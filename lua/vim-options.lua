@@ -17,7 +17,6 @@ vim.opt.scrolloff = 8
 vim.opt.signcolumn = "yes"
 vim.opt.isfname:append("@-@")
 vim.opt.updatetime = 50
---vim.opt.clipboard = "unnamedplus"
+vim.opt.clipboard:append { "unnamed", "unnamedplus" }
 vim.g.mapleader = " "
-
 
