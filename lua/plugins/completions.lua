@@ -13,7 +13,12 @@ return {
 	{
 		"hrsh7th/nvim-cmp",
 		config = function()
+            local cmp_autopairs = require("nvim-autopairs.completion.cmp")
 			local cmp = require("cmp")
+            cmp.event:on(
+                "confirm_done",
+                cmp_autopairs.on_confirm_done()
+            )
 			require("luasnip.loaders.from_vscode").lazy_load()
 			cmp.setup({
 				snippet = {
@@ -41,4 +46,18 @@ return {
 			})
 		end,
 	},
+    {
+        "windwp/nvim-autopairs",
+        event = "InsertEnter",
+        config = function ()
+            require("nvim-autopairs").setup{}
+        end
+    },
+    {
+        "windwp/nvim-ts-autotag",
+        requires = {"nvim-treesitter/nvim-treesitter"},
+        config = function ()
+            require("nvim-ts-autotag").setup({})
+        end
+    },
 }
