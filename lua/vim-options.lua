@@ -2,6 +2,7 @@ vim.cmd("set expandtab")
 vim.cmd("set tabstop=4")
 vim.cmd("set softtabstop=4")
 vim.cmd("set shiftwidth=4")
+vim.cmd("set ignorecase")
 vim.opt.nu = true
 vim.opt.relativenumber = true
 vim.opt.smartindent = true
@@ -109,6 +110,20 @@ vim.api.nvim_set_keymap(
 
 vim.api.nvim_set_keymap(
     "i",
+    "<s-Down>",
+    "<Nop>",
+     { noremap = true, silent = true}
+)
+
+vim.api.nvim_set_keymap(
+    "v",
+    "<s-Up>",
+    "<Nop>",
+    { noremap = true, silent = true}
+)
+
+vim.api.nvim_set_keymap(
+    "v",
     "<s-Down>",
     "<Nop>",
      { noremap = true, silent = true}
