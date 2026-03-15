@@ -9,6 +9,7 @@ vim.fn.system({
       lazypath,
     })
 end
+
 vim.opt.rtp:prepend(lazypath)
 
 function Restore(paths)

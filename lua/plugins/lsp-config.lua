@@ -1,3 +1,13 @@
+local lsps = {
+    "gopls",
+    "html",
+    "cssls",
+    "jsonls",
+    "lua_ls",
+    "ts_ls",
+    "pyright",
+    "rust_analyzer",
+}
 return {
     {
         "williamboman/mason.nvim",
@@ -8,19 +18,11 @@ return {
     },
     {
         "williamboman/mason-lspconfig.nvim",
+        dependencies = { "williamboman/mason.nvim" },
         config = function()
             require("mason-lspconfig").setup({
-                ensure_installed = {
-                    "gopls",
-                    "html",
-                    "cssls",
-                    "jsonls",
-                    "lua_ls",
-                    "ts_ls",
-                    "pyright",
-                    "rust_analyzer",
-                },
-                automatic_installation = true,
+                ensure_installed = lsps,
+                automatic_enable = true,
             })
         end,
     },
@@ -28,21 +30,19 @@ return {
         "neovim/nvim-lspconfig",
         config = function()
             local capabilities = require("cmp_nvim_lsp").default_capabilities()
-            local lspconfig = require("lspconfig")
-            lspconfig.lua_ls.setup({ capabilities = capabilities })
-            lspconfig.ts_ls.setup({ capabilities = capabilities })
-            lspconfig.cssls.setup({ capabilities = capabilities })
-            lspconfig.gopls.setup({ capabilities = capabilities })
-            lspconfig.html.setup({ capabilities = capabilities })
-            lspconfig.jsonls.setup({ capabilities = capabilities })
-            lspconfig.pyright.setup({ capabilities = capabilities })
-            lspconfig.rust_analyzer.setup({
-                capabilities = capabilities,
-                cmd = { "C:/Users/man20/appdata/local/nvim-data/mason/bin/rust-analyzer.cmd" },
-            })
+            for _, lsp in ipairs(lsps) do
+                vim.lsp.config(lsp, { capabilities = capabilities })
+            end
+            --vim.lsp.config("rust_analyzer", {
+              --  cmd = { "C:/Users/man20/appdata/local/nvim-data/mason/bin/rust-analyzer.cmd" },
+               -- capabilities = capabilities,
+            --})
+            vim.lsp.enable(lsps)
             vim.keymap.set("n", "<C-I>", vim.lsp.buf.hover, {})
             vim.keymap.set("n", "<F12>", vim.lsp.buf.definition, {})
+            vim.keymap.set("n", "gr", vim.lsp.buf.references)
             vim.keymap.set({ "n", "v" }, "<leader>ca", vim.lsp.buf.code_action, {})
+            vim.keymap.set("n", "<leader>l", vim.diagnostic.setloclist, {})
         end,
     },
 }
