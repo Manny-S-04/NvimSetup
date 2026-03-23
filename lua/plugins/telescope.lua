@@ -9,9 +9,9 @@ return {
             vim.keymap.set("n", "<leader>fs", builtin.live_grep, {})
             vim.keymap.set("v", "<leader>fs", builtin.grep_string, {})
             vim.keymap.set("n", "<leader>ds", builtin.lsp_document_symbols, {})
-            vim.keymap.set("n", "<leader>gr", builtin.lsp_references, {})
+            vim.keymap.set({"n", "v"}, "<leader>gr", builtin.lsp_references, {})
             vim.keymap.set("n", "<A-F2>", builtin.lsp_implementations, {})
-            vim.keymap.set("n", "<A-F12>", builtin.lsp_definitions, {})
+            vim.keymap.set("n", "<F12>", builtin.lsp_definitions, {})
             vim.keymap.set("n", "<leader>le",
                 function ()
                     builtin.diagnostics({
