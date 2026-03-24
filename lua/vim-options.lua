@@ -128,3 +128,19 @@ vim.api.nvim_set_keymap(
     "<Nop>",
      { noremap = true, silent = true}
 )
+
+--[[
+--vim.api.nvim_set_keymap("n", "<leader>sc", "", {
+	noremap = true,
+	silent = true,
+    desc = "[S]pell [C]heck",
+	callback = function()
+        local buffer = vim.api.nvim_get_current_buf()
+        local first_line = 0
+        local last_line =vim.api.nvim_buf_line_count(buffer)
+        fastspell.sendSpellCheckRequest(first_line, last_line)
+	end,
+})
+--
+--]]
+
