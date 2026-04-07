@@ -38,7 +38,7 @@ return {
                -- capabilities = capabilities,
             --})
             vim.lsp.enable(lsps)
-            vim.keymap.set("n", "<C-I>", vim.lsp.buf.hover, {})
+            vim.keymap.set("n", "<C-k>", vim.lsp.buf.hover, {})
             --vim.keymap.set("n", "<F12>", vim.lsp.buf.definition, {})
             --vim.keymap.set("n", "gr", vim.lsp.buf.references)
             vim.keymap.set({ "n", "v" }, "<leader>ca", vim.lsp.buf.code_action, {})
