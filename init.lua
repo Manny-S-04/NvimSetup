@@ -12,6 +12,27 @@ end
 
 vim.opt.rtp:prepend(lazypath)
 
+function Add(paths)
+  if type(paths) ~= "table" then
+    print("Error: Add expects a table of paths")
+    return
+  end
+
+  for _, path in ipairs(paths) do
+    local cmd = "git add " .. path
+    local result = vim.fn.system(cmd)
+    print(result)
+  end
+end
+
+vim.api.nvim_create_user_command("Add", function(opts)
+  local paths = {}
+  for path in string.gmatch(opts.args, "%S+") do
+    table.insert(paths, path)
+  end
+  Add(paths)
+end, {nargs = "+"})
+
 function Restore(paths)
   if type(paths) ~= "table" then
     print("Error: Restore expects a table of paths")
@@ -46,7 +67,7 @@ function ClearBuffers(buffers)
   end
 end
 
-vim.api.nvim_create_user_command("ClearBuffers", function(opts)
+vim.api.nvim_create_user_command("CB", function(opts)
   local paths = {}
   for path in string.gmatch(opts.args, "%S+") do
     table.insert(paths, path)

@@ -3,6 +3,7 @@ vim.cmd("set tabstop=4")
 vim.cmd("set softtabstop=4")
 vim.cmd("set shiftwidth=4")
 vim.cmd("set ignorecase")
+vim.cmd("set smartcase")
 vim.opt.nu = true
 vim.opt.relativenumber = true
 vim.opt.smartindent = true
@@ -22,6 +23,7 @@ vim.opt.clipboard:append { "unnamed", "unnamedplus" }
 vim.g.mapleader = " "
 
 vim.diagnostic.config({
+    virtual_lines = true,
     virtual_text = false,
     float = {
         border = "rounded",
@@ -60,6 +62,20 @@ vim.api.nvim_set_keymap(
 )
 
 vim.api.nvim_set_keymap(
+    "v",
+    "<A-Down>",
+    ":m '>+1<CR>gv=gv",
+    { noremap = true, silent = true }
+)
+
+vim.api.nvim_set_keymap(
+    "v",
+    "<A-Up>",
+    ":m '<-2<CR>gv=gv",
+    { noremap = true, silent = true }
+)
+
+vim.api.nvim_set_keymap(
     "n",
     "<PageUp>",
     "<Nop>",
@@ -128,19 +144,3 @@ vim.api.nvim_set_keymap(
     "<Nop>",
      { noremap = true, silent = true}
 )
-
---[[
---vim.api.nvim_set_keymap("n", "<leader>sc", "", {
-	noremap = true,
-	silent = true,
-    desc = "[S]pell [C]heck",
-	callback = function()
-        local buffer = vim.api.nvim_get_current_buf()
-        local first_line = 0
-        local last_line =vim.api.nvim_buf_line_count(buffer)
-        fastspell.sendSpellCheckRequest(first_line, last_line)
-	end,
-})
---
---]]
-
