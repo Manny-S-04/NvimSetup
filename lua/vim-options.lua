@@ -1,3 +1,9 @@
+local home = os.getenv("HOME") or os.getenv("USERPROFILE") or "~"
+local undodir = home .. "/.vim/undodir"
+if vim.fn.isdirectory(undodir) == 0 then
+    vim.fn.mkdir(undodir, "p")
+end
+
 vim.cmd("set expandtab")
 vim.cmd("set tabstop=4")
 vim.cmd("set softtabstop=4")
@@ -10,7 +16,7 @@ vim.opt.smartindent = true
 vim.opt.wrap = false
 vim.opt.swapfile = false
 vim.opt.backup = false
-vim.opt.undodir = os.getenv("USERPROFILE") .. "/.vim/undodir"
+vim.opt.undodir = undodir
 vim.opt.undofile = true
 vim.opt.hlsearch = false
 vim.opt.incsearch = true
