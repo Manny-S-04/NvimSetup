@@ -12,6 +12,19 @@ end
 
 vim.opt.rtp:prepend(lazypath)
 
+vim.api.nvim_create_user_command("Surround", function(opts)
+  local char = opts.args
+
+  if char == nil or char == "" then
+    print("Error: Surround expects a character")
+    return
+  end
+
+  vim.cmd("normal ysiw" .. char)
+end, {
+  nargs = 1,
+})
+
 function Add(paths)
   if type(paths) ~= "table" then
     print("Error: Add expects a table of paths")
@@ -61,7 +74,7 @@ function ClearBuffers(buffers)
   end
 
   for _, path in ipairs(buffers) do
-    local cmd = "bd " .. path
+    local cmd = "bd! " .. path
     local result = vim.cmd(cmd)
     print(result)
   end
