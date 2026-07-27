@@ -1,9 +1,19 @@
 return {
     {
+        "nvim-telescope/telescope-ui-select.nvim",
+    },
+    {
         "nvim-telescope/telescope.nvim",
         tag = "0.1.6",
         dependencies = { "nvim-lua/plenary.nvim" },
         config = function()
+            vim.api.nvim_create_autocmd("User", {
+                pattern = "TelescopePreviewerLoaded",
+                callback = function(args)
+                    vim.wo.wrap = true
+                    vim.wo.linebreak = true
+                end,
+            })
             local builtin = require("telescope.builtin")
             vim.keymap.set("n", "<leader>ff", builtin.find_files, {})
             vim.keymap.set("n", "<leader>fs", builtin.live_grep, {})
@@ -22,12 +32,30 @@ return {
                     })
                 end
                 , {})
-        end,
-    },
-    {
-        "nvim-telescope/telescope-ui-select.nvim",
-        config = function()
+            local width = 0.6
+
             require("telescope").setup({
+                defaults = {
+                    path_display = { "filename_first" },
+                },
+                pickers = {
+                    live_grep = {
+                        layout_strategy = "horizontal",
+                        layout_config = {
+                            horizontal = {
+                                preview_width = width,
+                            },
+                        },
+                    },
+                    lsp_references = {
+                        layout_strategy = "horizontal",
+                        layout_config = {
+                            horizontal = {
+                                preview_width = width,
+                            },
+                        },
+                    },
+                },
                 extensions = {
                     ["ui-select"] = {
                         require("telescope.themes").get_dropdown({}),
