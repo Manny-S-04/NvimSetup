@@ -10,6 +10,7 @@ vim.cmd("set softtabstop=4")
 vim.cmd("set shiftwidth=4")
 vim.cmd("set ignorecase")
 vim.cmd("set smartcase")
+
 vim.opt.nu = true
 vim.opt.relativenumber = true
 vim.opt.smartindent = true
