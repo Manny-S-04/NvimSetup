@@ -146,3 +146,4 @@ end, { range = true })
 
 require("vim-options")
 require("lazy").setup("plugins")
+require('mini_complete').setup()
