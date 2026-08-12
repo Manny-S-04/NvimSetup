@@ -12,6 +12,23 @@ end
 
 vim.opt.rtp:prepend(lazypath)
 
+vim.api.nvim_create_user_command("History", function(opts)
+  local ticket = opts.args
+
+  local commit = vim.fn.system(
+    'git log --grep="' .. ticket .. '" -1 --format="%H"'
+  ):gsub("\n", "")
+
+  if commit == "" then
+    vim.notify("No commit found for " .. ticket, vim.log.levels.WARN)
+    return
+  end
+
+  vim.cmd("Git show " .. commit)
+end, {
+  nargs = 1,
+})
+
 vim.api.nvim_create_user_command("Lorem", function()
     vim.cmd([[
         put ='Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'

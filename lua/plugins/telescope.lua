@@ -36,7 +36,7 @@ return {
 
             require("telescope").setup({
                 defaults = {
-                    path_display = { "filename_first" },
+                    path_display = { "truncate" },
                 },
                 pickers = {
                     live_grep = {

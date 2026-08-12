@@ -1,16 +1,15 @@
 local M = {}
 
 local NS = vim.api.nvim_create_namespace('mini_complete')
-local DOC_GAP = 1 -- blank rows between candidate bar and docs window
+local DOC_GAP = 1
 
--- Highlight groups you can override in your own config, e.g.:
---   vim.api.nvim_set_hl(0, 'MiniCompleteNormal', { bg = '#1a1b26', fg = '#c0caf5' })
--- Call this AFTER require('mini_complete').setup() (or after :colorscheme) to win.
 local function set_default_highlights()
   vim.api.nvim_set_hl(0, 'MiniCompleteNormal', { bg = '#1e1e2e', fg = '#cdd6f4', default = true })
   vim.api.nvim_set_hl(0, 'MiniCompleteSelected', { bg = '#45475a', fg = '#f5e0dc', bold = true, default = true })
   vim.api.nvim_set_hl(0, 'MiniCompleteDocNormal', { bg = '#181825', fg = '#cdd6f4', default = true })
   vim.api.nvim_set_hl(0, 'MiniCompleteDocBorder', { fg = '#585b70', default = true })
+  vim.api.nvim_set_hl(0, 'MiniCompleteSnippet', { fg = '#f38ba8', default = true })
+  vim.api.nvim_set_hl(0, 'MiniCompleteSnippetSelected', { bg = '#45475a', fg = '#f38ba8', bold = true, default = true })
 end
 
 local state = {
@@ -32,6 +31,7 @@ local state = {
   doc_focused = false,
   return_win = nil,
   return_cursor = nil,
+  suppress_next_change = false,
 }
 
 local function feed(keys)
@@ -47,7 +47,7 @@ local function close_doc_window()
 end
 
 local function close_window()
-  if state.doc_focused then return end -- don't tear down while the docs window has real focus
+  if state.doc_focused then return end
   if state.win and vim.api.nvim_win_is_valid(state.win) then
     vim.api.nvim_win_close(state.win, true)
   end
@@ -96,8 +96,21 @@ local function render()
     local text = item.label
     table.insert(parts, text)
     col = col + #text
-    if i == state.selected then
-      table.insert(highlights, { start_col, col })
+
+    local is_selected = (i == state.selected)
+    local is_snippet = item.__snippet ~= nil
+    local group
+    if is_selected and is_snippet then
+      group = 'MiniCompleteSnippetSelected'
+    elseif is_selected then
+      group = 'MiniCompleteSelected'
+    elseif is_snippet then
+      group = 'MiniCompleteSnippet'
+    end
+    if group then
+      table.insert(highlights, { start_col, col, group })
+    end
+    if is_selected then
       sel_start, sel_end = start_col, col
     end
   end
@@ -106,13 +119,12 @@ local function render()
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, { line })
   vim.api.nvim_buf_clear_namespace(buf, NS, 0, -1)
   for _, hl in ipairs(highlights) do
-    vim.api.nvim_buf_add_highlight(buf, NS, 'MiniCompleteSelected', 0, hl[1], hl[2])
+    vim.api.nvim_buf_add_highlight(buf, NS, hl[3], 0, hl[1], hl[2])
   end
 
   local width = vim.o.columns
   local row = vim.o.lines - vim.o.cmdheight - 2
 
-  -- keep the selected item within the visible horizontal window
   if sel_end > state.leftcol + width then
     state.leftcol = sel_end - width
   end
@@ -170,16 +182,13 @@ local function render_docs(doc)
   vim.api.nvim_buf_set_lines(state.doc_buf, 0, -1, false, lines)
   vim.bo[state.doc_buf].modifiable = false
 
-  -- candidate_row is the top row of the candidate bar (border-less, 1 row tall)
   local candidate_row = vim.o.lines - vim.o.cmdheight - 2
-  -- reserve DOC_GAP blank rows, plus 2 rows for the doc window's own rounded border
   local available = candidate_row - DOC_GAP - 2
   local height = math.min(#lines, 12, available)
   if height < 1 then
     close_doc_window()
     return
   end
-  -- 'row' is the content top-left; the border extends 1 row above/below that automatically
   local row = candidate_row - DOC_GAP - height - 1
   local width = vim.o.columns
 
@@ -210,6 +219,11 @@ local function resolve_and_show_docs()
     return
   end
 
+  if item.__snippet then
+    render_docs(item.__snippet:get_docstring() and table.concat(item.__snippet:get_docstring(), '\n') or item.label)
+    return
+  end
+
   state.doc_request_id = state.doc_request_id + 1
   local this_request = state.doc_request_id
 
@@ -225,8 +239,8 @@ local function resolve_and_show_docs()
   end
 
   client:request('completionItem/resolve', item, function(err, resolved)
-    if this_request ~= state.doc_request_id then return end -- superseded by a newer request
-    if not state.docs_shown then return end -- user toggled docs off in the meantime
+    if this_request ~= state.doc_request_id then return end
+    if not state.docs_shown then return end
     if err or not resolved then return end
     state.items[state.selected] = resolved
     render_docs(resolved.documentation)
@@ -257,21 +271,39 @@ local function get_client()
   return clients[1]
 end
 
-local function request_completion()
-  local client = get_client()
-  if not client then return end
+local function get_snippet_matches(prefix)
+  local ok, ls = pcall(require, 'luasnip')
+  if not ok or prefix == '' then return {} end
+  local ft = vim.bo.filetype
+  local raw = ls.get_snippets(ft) or {}
+  local matches = {}
+  for _, snip in ipairs(raw) do
+    local trigger = snip.trigger or ''
+    if trigger:lower():find(prefix:lower(), 1, true) == 1 then
+      table.insert(matches, {
+        label = trigger,
+        sortText = '0' .. trigger,
+        __snippet = snip,
+      })
+    end
+  end
+  return matches
+end
 
+local function in_member_access(start_col)
+  if start_col <= 0 then return false end
+  local line = vim.api.nvim_get_current_line()
+  local ch = line:sub(start_col, start_col)
+  return ch == '.' or ch == ':'
+end
+
+local function request_completion()
   state.request_id = state.request_id + 1
   local this_request = state.request_id
+  local client = get_client()
 
-  local params = vim.lsp.util.make_position_params(0, client.offset_encoding)
-  client:request('textDocument/completion', params, function(err, result)
-    if this_request ~= state.request_id then return end -- a newer keystroke already fired
-
-    if err or not result then
-      close_window()
-      return
-    end
+  local function finish(lsp_items)
+    if this_request ~= state.request_id then return end
 
     local prefix, start_col = get_prefix()
     if prefix == '' then
@@ -279,13 +311,15 @@ local function request_completion()
       return
     end
 
-    local items = result.items or result
     local filtered = {}
-    for _, item in ipairs(items) do
+    for _, item in ipairs(lsp_items or {}) do
       local label = item.label or ''
       if label:lower():find(prefix:lower(), 1, true) == 1 then
         table.insert(filtered, item)
       end
+    end
+    for _, snip_item in ipairs(in_member_access(start_col) and {} or get_snippet_matches(prefix)) do
+      table.insert(filtered, snip_item)
     end
     table.sort(filtered, function(a, b) return (a.sortText or a.label) < (b.sortText or b.label) end)
 
@@ -298,11 +332,25 @@ local function request_completion()
     state.selected = 1
     state.active = true
     state.start_col = start_col
-    state.client_id = client.id
+    state.client_id = client and client.id or nil
     state.docs_shown = false
     state.leftcol = 0
-    close_doc_window() -- never auto-show docs while typing
+    close_doc_window()
     render()
+  end
+
+  if not client then
+    finish({})
+    return
+  end
+
+  local params = vim.lsp.util.make_position_params(0, client.offset_encoding)
+  client:request('textDocument/completion', params, function(err, result)
+    if err or not result then
+      finish({})
+      return
+    end
+    finish(result.items or result)
   end, 0)
 end
 
@@ -364,11 +412,25 @@ end
 function M.accept()
   if not state.active then return end
   local item = state.items[state.selected]
-  local insert_text = item.insertText or item.label
-  local lines = vim.split(insert_text, '\n', { plain = true })
   local cursor = vim.api.nvim_win_get_cursor(0)
   local row, col = cursor[1] - 1, cursor[2]
 
+  if item.__snippet then
+    state.suppress_next_change = true
+    vim.api.nvim_buf_set_text(0, row, state.start_col, row, col, { '' })
+    vim.api.nvim_win_set_cursor(0, { row + 1, state.start_col })
+    close_window()
+    local ok, ls = pcall(require, 'luasnip')
+    if ok then
+      ls.snip_expand(item.__snippet:copy())
+    end
+    return
+  end
+
+  local insert_text = item.insertText or item.label
+  local lines = vim.split(insert_text, '\n', { plain = true })
+
+  state.suppress_next_change = true
   vim.api.nvim_buf_set_text(0, row, state.start_col, row, col, lines)
 
   local last_line_len = #lines[#lines]
@@ -406,11 +468,15 @@ function M.setup()
   vim.api.nvim_create_autocmd('TextChangedI', {
     group = group,
     callback = function()
+      if state.suppress_next_change then
+        state.suppress_next_change = false
+        return
+      end
       local prefix = get_prefix()
       if #prefix >= 1 then
         request_completion()
       else
-        state.request_id = state.request_id + 1 -- invalidate any in-flight request
+        state.request_id = state.request_id + 1
         close_window()
       end
     end,
@@ -449,7 +515,6 @@ function M.setup()
     feed('<Esc>')
   end)
 
-  -- toggle docs panel for the currently selected item ("show mode")
   local function toggle_docs_handler(fallback_keys)
     return function()
       if state.active then
@@ -483,6 +548,24 @@ function M.setup()
       scroll_docs(-1)
     else
       feed('<C-b>')
+    end
+  end)
+
+  vim.keymap.set('i', '<C-l>', function()
+    local ok, ls = pcall(require, 'luasnip')
+    if ok and ls.jumpable(1) then
+      ls.jump(1)
+    else
+      feed('<C-l>')
+    end
+  end)
+
+  vim.keymap.set('i', '<C-h>', function()
+    local ok, ls = pcall(require, 'luasnip')
+    if ok and ls.jumpable(-1) then
+      ls.jump(-1)
+    else
+      feed('<C-h>')
     end
   end)
 end

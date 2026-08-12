@@ -51,8 +51,8 @@ return {
             end
 
             vim.lsp.config("rust_analyzer", {
-                --cmd = { "C:/Users/man20/appdata/local/nvim-data/mason/bin/rust-analyzer.cmd" },
-                cmd = { "/home/manny/.local/share/nvim/mason/bin/rust-analyzer" },
+                cmd = { "C:/Users/manny/appdata/local/nvim-data/mason/bin/rust-analyzer.cmd" },
+                --cmd = { "/home/manny/.local/share/nvim/mason/bin/rust-analyzer" },
                 capabilities = capabilities,
                 filetypes = { "rust" },
             })
