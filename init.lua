@@ -298,3 +298,6 @@ end, {
 require("vim-options")
 require("lazy").setup("plugins")
 require('mini_complete').setup()
+-- Work Jira: reads JIRA_URL / JIRA_EMAIL / JIRA_API_TOKEN from the environment.
+-- Silent at startup if they're missing; :JiraMine etc. will tell you what's unset.
+require('jira').setup()

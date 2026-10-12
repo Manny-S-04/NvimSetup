@@ -1,62 +1,93 @@
-local issues = require("jira.api.issues")
-local issue_ui = require("jira.ui.issue")
+local config = require("jira.config")
 
 local M = {}
 
-local function notify_error(prefix, err)
-  vim.notify(("jira.nvim: %s: %s"):format(prefix, err and err.message or "unknown error"), vim.log.levels.ERROR)
+local function ensure_configured()
+  return config.validate()
+end
+
+--- Issue key under the cursor (e.g. in a commit message or a TODO), or nil.
+local function key_under_cursor()
+  local word = vim.fn.expand("<cWORD>")
+  return word:match("[A-Za-z][A-Za-z0-9_]*%-%d+")
 end
 
 local function cmd_jira_issue(cmd_opts)
+  if not ensure_configured() then
+    return
+  end
   local key = vim.trim(cmd_opts.args or "")
   if key == "" then
-    vim.notify("jira.nvim: usage :JiraIssue <ISSUE-KEY>", vim.log.levels.WARN)
+    key = key_under_cursor() or ""
+  end
+  if key == "" then
+    vim.notify("jira.nvim: usage :JiraIssue <ISSUE-KEY> (or put the cursor on a key)", vim.log.levels.WARN)
     return
   end
+  require("jira.ui.issue").open_key(key:upper())
+end
 
-  local valid, key_err = issues.validate_key(key)
-  if not valid then
-    vim.notify("jira.nvim: " .. key_err, vim.log.levels.ERROR)
+local function cmd_jira_mine()
+  if not ensure_configured() then
     return
   end
+  require("jira.ui.list").open("My issues", config.options.jql_mine)
+end
 
-  local issue, err = issues.get(key)
-  if not issue then
-    notify_error("failed to fetch " .. key, err)
+local function cmd_jira_search(cmd_opts)
+  if not ensure_configured() then
     return
   end
-
-  issue_ui.open(issue)
+  local jql = vim.trim(cmd_opts.args or "")
+  if jql == "" then
+    vim.notify("jira.nvim: usage :JiraSearch <JQL>", vim.log.levels.WARN)
+    return
+  end
+  require("jira.ui.list").open("Search: " .. jql, jql)
 end
 
 local function cmd_jira_refresh()
-  issue_ui.refresh(vim.api.nvim_get_current_buf())
+  require("jira.ui.issue").refresh(vim.api.nvim_get_current_buf())
 end
 
 local function cmd_jira_help()
   local lines = {
-    "jira.nvim (early-stage)",
+    "jira.nvim",
     "",
     "Commands:",
-    "  :JiraIssue <KEY>   View a Jira issue, e.g. :JiraIssue PROJ-123",
-    "  :JiraRefresh       Refresh the current Jira issue buffer",
+    "  :JiraMine            Your open issues",
+    "  :JiraSearch <JQL>    Issues matching a JQL query",
+    "  :JiraIssue [KEY]     Open an issue (defaults to the key under the cursor)",
+    "  :JiraRefresh         Refresh the current issue buffer",
     "",
-    "Planned: comments, transitions, assignment, JQL search, boards/sprints.",
+    "In a list:   <CR> open · gx browser · r refresh · q close",
+    "In an issue: s status · c comment · a assign to me · gx browser · r refresh · q close",
+    "",
+    ("Connected to: %s (%s)"):format(
+      config.options.url or "(not configured)",
+      config.is_cloud() and "Cloud, API v3" or "Server/DC, API v2"
+    ),
   }
   vim.notify(table.concat(lines, "\n"), vim.log.levels.INFO)
 end
 
 function M.setup()
   vim.api.nvim_create_user_command("JiraIssue", cmd_jira_issue, {
-    nargs = 1,
+    nargs = "?",
     desc = "View a Jira issue in a buffer",
   })
-
+  vim.api.nvim_create_user_command("JiraMine", cmd_jira_mine, {
+    nargs = 0,
+    desc = "List Jira issues assigned to you",
+  })
+  vim.api.nvim_create_user_command("JiraSearch", cmd_jira_search, {
+    nargs = "+",
+    desc = "List Jira issues matching JQL",
+  })
   vim.api.nvim_create_user_command("JiraRefresh", cmd_jira_refresh, {
     nargs = 0,
     desc = "Refresh the current Jira issue buffer",
   })
-
   vim.api.nvim_create_user_command("Jira", cmd_jira_help, {
     nargs = 0,
     desc = "Show jira.nvim help",
