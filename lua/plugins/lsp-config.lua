@@ -16,7 +16,6 @@ return {
             require("mason").setup({
                 PATH = "prepend",
                 registries = {
-                    "github:mason-org/mason-registry",
                     "github:Crashdummyy/mason-registry",
                 },
             })
@@ -74,10 +73,10 @@ return {
                 broad_search = true,
             })
             vim.lsp.enable({ "roslyn", "rzls" })
-
-            --vim.lsp.enable(lsps)
+            vim.lsp.config("*", { capabilities = capabilities })
+            vim.lsp.enable(lsps)
             vim.keymap.set("n", "<C-k>", vim.lsp.buf.hover, {})
-            --vim.keymap.set("n", "<F12>", vim.lsp.buf.definition, {})
+            vim.keymap.set("n", "<F12>", vim.lsp.buf.definition, {})
             --vim.keymap.set("n", "gr", vim.lsp.buf.references)
             vim.keymap.set({ "n", "v" }, "<leader>ca", vim.lsp.buf.code_action, {})
             --vim.keymap.set("n", "<leader>l", vim.diagnostic.setloclist, {})

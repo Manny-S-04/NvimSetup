@@ -334,3 +334,4 @@ local function enter_resize_mode()
 end
 
 vim.keymap.set("n", "<leader>r", enter_resize_mode)
+require('jira').setup()
