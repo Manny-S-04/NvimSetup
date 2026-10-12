@@ -14,9 +14,7 @@ return {
     {
         "EdenEast/nightfox.nvim",
     },
-    {
-        "nyoom-engineering/oxocarbon.nvim",
-    },
+    --{ "nyoom-engineering/oxocarbon.nvim", },
     {
         "zaldih/themery.nvim",
         lazy = false,
@@ -27,7 +25,7 @@ return {
                     {name = "tokyonight", colorscheme = "tokyonight-storm"},
                     {name = "nightfox-carbonfox", colorscheme = "carbonfox"},
                     {name = "nightfox-nordfox", colorscheme = "nordfox"},
-                    {name = "oxocarbon", colorscheme = "oxocarbon"},
+                    --{name = "oxocarbon", colorscheme = "oxocarbon"},
                 },
                 livePreview = true,
             })

@@ -10,6 +10,16 @@ if not (vim.uv or vim.loop).fs_stat(lazypath) then
     })
 end
 
+if vim.lsp.codelens and not vim.lsp.codelens._refresh then
+    vim.lsp.codelens._refresh = vim.lsp.codelens.refresh
+end
+
+if not vim.fs.ext then
+    vim.fs.ext = function(path)
+        return vim.fn.fnamemodify(path, ":e")
+    end
+end
+
 vim.opt.rtp:prepend(lazypath)
 
 vim.api.nvim_create_user_command("History", function(opts)
@@ -298,3 +308,29 @@ end, {
 require("vim-options")
 require("lazy").setup("plugins")
 require('mini_complete').setup()
+
+local resize_mode_active = false
+
+local function enter_resize_mode()
+    if resize_mode_active then return end
+    resize_mode_active = true
+    vim.notify("RESIZE MODE — arrows to resize, Esc to exit")
+
+    local function exit_resize_mode()
+        vim.keymap.del("n", "<Left>")
+        vim.keymap.del("n", "<Right>")
+        vim.keymap.del("n", "<Up>")
+        vim.keymap.del("n", "<Down>")
+        vim.keymap.del("n", "<Esc>")
+        resize_mode_active = false
+        vim.notify("RESIZE MODE OFF")
+    end
+
+    vim.keymap.set("n", "<Left>", "<cmd>vertical resize -2<CR>")
+    vim.keymap.set("n", "<Right>", "<cmd>vertical resize +2<CR>")
+    vim.keymap.set("n", "<Up>", "<cmd>resize +2<CR>")
+    vim.keymap.set("n", "<Down>", "<cmd>resize -2<CR>")
+    vim.keymap.set("n", "<Esc>", exit_resize_mode)
+end
+
+vim.keymap.set("n", "<leader>r", enter_resize_mode)
