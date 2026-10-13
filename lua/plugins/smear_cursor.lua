@@ -9,5 +9,9 @@ return {
         scroll_buffer_space = true,
         legacy_computing_symbols_support = false,
         smear_insert_mode = true,
+        -- nvim-dap starts the debugged app in these buffers from inside a text-locked callback;
+        -- drawing the smear there raises E565 and aborts the launch (F5 never attaches).
+        filetypes_disabled = { "dapui_console", "dap-repl", "dap-terminal", "dapui_scopes",
+            "dapui_watches", "dapui_stacks", "dapui_breakpoints" },
     },
 }

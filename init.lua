@@ -307,6 +307,8 @@ end, {
 
 require("vim-options")
 require("lazy").setup("plugins")
+require("vs-keymaps")
+require("csharp-lsp").setup()
 
 local resize_mode_active = false
 

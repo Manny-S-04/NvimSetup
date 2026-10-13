@@ -4,6 +4,9 @@
 -- Crashdummyy registry added in lsp-config.lua — it tracks the version VS Code ships).
 return {
     "seblyng/roslyn.nvim",
+    -- Fallback only: easy-dotnet.nvim (dotnet.lua) normally runs Roslyn. lua/csharp-lsp.lua loads this
+    -- plugin (which starts its own Roslyn) only if easy-dotnet's server doesn't attach or dies.
+    lazy = true,
     -- Pinned: the next commit (dbd677f, "feat!: >=0.12") drops Neovim 0.11 support.
     -- Remove this pin once you move to Neovim 0.12.
     commit = "f2ec6ee6384c3b611ddc817b9e78b20cd0334bbb",
