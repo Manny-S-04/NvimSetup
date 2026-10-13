@@ -43,27 +43,30 @@ local function load(bufnr)
 end
 
 local function setup_keymaps(bufnr)
-  local function map(lhs, fn, desc)
-    vim.keymap.set("n", lhs, fn, { buffer = bufnr, nowait = true, silent = true, desc = desc })
+  local keys = (require("jira.config").options.keymaps or {}).list or {}
+  local function map(name, fn, desc)
+    if keys[name] then
+      vim.keymap.set("n", keys[name], fn, { buffer = bufnr, nowait = true, silent = true, desc = "Jira: " .. desc })
+    end
   end
-  map("<CR>", function()
+  map("open", function()
     local key = key_under_cursor(bufnr)
     if key then
       require("jira.ui.issue").open_key(key)
     end
-  end, "Open Jira issue")
-  map("gx", function()
+  end, "open issue")
+  map("browser", function()
     local key = key_under_cursor(bufnr)
     if key then
       vim.ui.open(issues.browse_url(key))
     end
-  end, "Open Jira issue in browser")
-  map("r", function()
+  end, "open issue in browser")
+  map("refresh", function()
     load(bufnr)
-  end, "Refresh list")
-  map("q", function()
+  end, "refresh list")
+  map("close", function()
     vim.api.nvim_buf_delete(bufnr, { force = true })
-  end, "Close list")
+  end, "close list")
 end
 
 --- Open a list buffer for the given JQL.

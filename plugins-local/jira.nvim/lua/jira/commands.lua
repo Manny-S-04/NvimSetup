@@ -60,8 +60,7 @@ local function cmd_jira_help()
     "  :JiraIssue [KEY]     Open an issue (defaults to the key under the cursor)",
     "  :JiraRefresh         Refresh the current issue buffer",
     "",
-    "In a list:   <CR> open · gx browser · r refresh · q close",
-    "In an issue: s status · c comment · a assign to me · gx browser · r refresh · q close",
+    "In a list / an issue: press the help key (default g?) in an issue buffer for its keys.",
     "",
     ("Connected to: %s (%s)"):format(
       config.options.url or "(not configured)",

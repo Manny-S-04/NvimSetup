@@ -16,6 +16,9 @@ return {
             require("mason").setup({
                 PATH = "prepend",
                 registries = {
+                    -- The main registry must stay first: lua_ls, gopls, netcoredbg etc. live there.
+                    "github:mason-org/mason-registry",
+                    -- Adds the "roslyn" package (C# LSP, same version as VS Code) used by roslyn.lua
                     "github:Crashdummyy/mason-registry",
                 },
             })
@@ -33,53 +36,19 @@ return {
     },
     {
         "neovim/nvim-lspconfig",
-        dependencies = {
-            "seblyng/roslyn.nvim",
-            "tris203/rzls.nvim",
-        },
         config = function()
-            --local capabilities = require("cmp_nvim_lsp").default_capabilities()
             local capabilities = vim.lsp.protocol.make_client_capabilities()
             capabilities.textDocument.completion.completionItem.snippetSupport = true
 
-            for _, lsp in ipairs(lsps) do
-                require("lspconfig")[lsp].setup({
-                    capabilities = capabilities,
-                })
-            end
-
-            vim.lsp.config("rust_analyzer", {
-                cmd = { "C:/Users/manny/appdata/local/nvim-data/mason/bin/rust-analyzer.cmd" },
-                --cmd = { "/home/manny/.local/share/nvim/mason/bin/rust-analyzer" },
-                capabilities = capabilities,
-                filetypes = { "rust" },
-            })
-            require("rzls").setup({})
-            require("roslyn").setup({
-                capabilities = capabilities,
-                config = {
-                    settings = {
-                        ["csharp|inlay_hints"] = {
-                            csharp_enable_inlay_hints_for_implicit_object_creation = true,
-                            csharp_enable_inlay_hints_for_lambda_parameter_types = true,
-                            dotnet_enable_inlay_hints_for_parameters = true,
-                        },
-                        ["csharp|code_lens"] = {
-                            dotnet_enable_references_code_lens = true,
-                        },
-                    },
-                },
-                filewatching = "roslyn",
-                broad_search = true,
-            })
-            vim.lsp.enable({ "roslyn", "rzls" })
+            -- Native 0.11 API: "*" applies to every server; nvim-lspconfig supplies the
+            -- per-server defaults (cmd, filetypes, root markers) via its lsp/*.lua files.
+            -- C#/Razor is configured separately in roslyn.lua.
             vim.lsp.config("*", { capabilities = capabilities })
             vim.lsp.enable(lsps)
-            vim.keymap.set("n", "<C-k>", vim.lsp.buf.hover, {})
-            vim.keymap.set("n", "<F12>", vim.lsp.buf.definition, {})
-            --vim.keymap.set("n", "gr", vim.lsp.buf.references)
-            vim.keymap.set({ "n", "v" }, "<leader>ca", vim.lsp.buf.code_action, {})
-            --vim.keymap.set("n", "<leader>l", vim.diagnostic.setloclist, {})
+
+            vim.keymap.set("n", "<C-k>", vim.lsp.buf.hover, { desc = "LSP hover" })
+            vim.keymap.set({ "n", "v" }, "<leader>ca", vim.lsp.buf.code_action, { desc = "LSP code action" })
+            -- <F12> (go to definition) is mapped in telescope.lua.
         end,
     },
 }

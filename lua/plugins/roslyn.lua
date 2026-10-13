@@ -17,6 +17,9 @@ return {
         broad_search = true,
     },
     config = function(_, opts)
+        -- Neovim has no built-in "razor" filetype; roslyn.nvim attaches to it (Razor cohosting).
+        vim.filetype.add({ extension = { razor = "razor", cshtml = "razor" } })
+
         vim.lsp.config("roslyn", {
             settings = {
                 ["csharp|inlay_hints"] = {

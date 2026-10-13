@@ -13,6 +13,30 @@ local defaults = {
   -- JQL behind :JiraMine
   jql_mine = "assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC",
   max_results = 50,
+  -- Field holding the sprint. customfield_10020 on Jira Cloud; on Server/DC it differs per
+  -- instance (find it at /rest/api/2/field, the one with "schema.custom" ending in ":gh-sprint").
+  sprint_field = "customfield_10020",
+  -- How issue/list buffers are opened: "split", "vsplit", "tabnew" or "edit".
+  open_cmd = "split",
+  -- Buffer-local keymaps. Set any entry to false to disable it.
+  keymaps = {
+    issue = {
+      close = "q",
+      refresh = "r",
+      status = "s",
+      comment = "c",
+      assign_me = "a",
+      unassign = "A",
+      browser = "gx",
+      help = "g?",
+    },
+    list = {
+      open = "<CR>",
+      browser = "gx",
+      refresh = "r",
+      close = "q",
+    },
+  },
 }
 
 M.options = vim.deepcopy(defaults)
@@ -79,7 +103,8 @@ function M.validate()
   end
 
   if #missing > 0 then
-    vim.notify(("jira.nvim: missing configuration: %s"):format(table.concat(missing, ", ")), vim.log.levels.ERROR)
+    -- WARN, not ERROR: an ERROR raised inside a (lazy-loaded) user command becomes a stack trace.
+    vim.notify(("jira.nvim: missing configuration: %s"):format(table.concat(missing, ", ")), vim.log.levels.WARN)
     return false
   end
 

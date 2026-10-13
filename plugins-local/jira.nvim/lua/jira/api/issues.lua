@@ -56,7 +56,15 @@ end
 
 -- customfield_10020 is the Sprint field on Jira Cloud. On Server/DC the sprint field id varies
 -- per instance, and its value is a string like "com.atlassian...Sprint@1a2b[id=1,name=Sprint 7,...]".
-local FIELDS = "summary,status,assignee,reporter,priority,issuetype,description,comment,sprint,customfield_10020,updated"
+local BASE_FIELDS = "summary,status,assignee,reporter,priority,issuetype,description,comment,sprint,updated"
+
+local function fields()
+  local sprint_field = config.options.sprint_field
+  if sprint_field and sprint_field ~= "" then
+    return BASE_FIELDS .. "," .. sprint_field
+  end
+  return BASE_FIELDS
+end
 local LIST_FIELDS = "summary,status,assignee,priority,issuetype,updated"
 
 local function sprint_name(s)
@@ -73,7 +81,7 @@ local function extract_sprint(fields)
     return direct
   end
 
-  local cf = fields.customfield_10020
+  local cf = fields[config.options.sprint_field or "customfield_10020"]
   if type(cf) == "table" and cf[1] then
     local chosen = sprint_name(cf[1])
     for _, s in ipairs(cf) do
@@ -134,7 +142,7 @@ function M.get(key, cb)
   end
 
   local path = api(("/issue/%s"):format(client.uri_encode(key)))
-  return call("GET", path, { query = { fields = FIELDS } }, function(result)
+  return call("GET", path, { query = { fields = fields() } }, function(result)
     return from_response(result.body)
   end, cb)
 end
@@ -256,6 +264,16 @@ function M.assign_to_me(key, cb)
   return call("PUT", path, { body = body_for(me) }, function()
     return true
   end)
+end
+
+--- Remove the assignee. JSON null means "unassigned" on both Cloud and Server/DC.
+--- (vim.NIL, not nil: a Lua table can't hold nil, and {} would be rejected.)
+function M.unassign(key, cb)
+  local path = api(("/issue/%s/assignee"):format(client.uri_encode(key)))
+  local body = config.is_cloud() and { accountId = vim.NIL } or { name = vim.NIL }
+  return call("PUT", path, { body = body }, function()
+    return true
+  end, cb)
 end
 
 --- Web URL for an issue.

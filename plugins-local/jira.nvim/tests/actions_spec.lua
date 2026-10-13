@@ -205,3 +205,43 @@ describe("jira.ui.render.render_list", function()
     assert.are.equal("LONG-22", keys[4])
   end)
 end)
+
+describe("jira.api.issues unassign + sprint_field", function()
+  local issues, client, config
+  before_each(function()
+    package.loaded["jira.api.issues"] = nil
+    package.loaded["jira.api.client"] = nil
+    package.loaded["jira.config"] = nil
+    config = require("jira.config")
+    client = require("jira.api.client")
+    issues = require("jira.api.issues")
+  end)
+
+  it("unassigns with a JSON null in the right field", function()
+    local bodies = {}
+    client.request = function(method, _, opts)
+      assert.are.equal("PUT", method)
+      table.insert(bodies, vim.json.encode(opts.body))
+      return { status = 204 }
+    end
+    config.setup({ url = "https://corp.atlassian.net", email = "a@b.com", api_token = "t" })
+    issues.unassign("A-1")
+    config.setup({ url = "https://jira.corp.local", api_token = "t" })
+    issues.unassign("A-1")
+    assert.are.same({ '{"accountId":null}', '{"name":null}' }, bodies)
+  end)
+
+  it("reads the sprint from a configurable field", function()
+    config.setup({ url = "https://jira.corp.local", api_token = "t", sprint_field = "customfield_12345" })
+    local requested_fields
+    client.request = function(_, _, opts)
+      requested_fields = opts.query.fields
+      return {
+        status = 200,
+        body = { key = "A-1", fields = { customfield_12345 = { "x.Sprint@1[id=1,state=ACTIVE,name=Team Sprint 9]" } } },
+      }
+    end
+    assert.are.equal("Team Sprint 9", issues.get("A-1").sprint)
+    assert.is_not_nil(requested_fields:find("customfield_12345", 1, true))
+  end)
+end)

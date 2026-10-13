@@ -1,17 +1,76 @@
+-- mini_complete: LSP completion in a one-line bar at the bottom of the screen
+-- (vertico/minibuffer style) instead of a popup at the cursor.
 local M = {}
 
 local NS = vim.api.nvim_create_namespace('mini_complete')
-local DOC_GAP = 1
-local DEBOUNCE_MS = 30
-local RESOLVE_TIMEOUT_MS = 300
 
-local function set_default_highlights()
-  vim.api.nvim_set_hl(0, 'MiniCompleteNormal', { bg = '#1e1e2e', fg = '#cdd6f4', default = true })
-  vim.api.nvim_set_hl(0, 'MiniCompleteSelected', { bg = '#45475a', fg = '#f5e0dc', bold = true, default = true })
-  vim.api.nvim_set_hl(0, 'MiniCompleteDocNormal', { bg = '#181825', fg = '#cdd6f4', default = true })
-  vim.api.nvim_set_hl(0, 'MiniCompleteDocBorder', { fg = '#585b70', default = true })
-  vim.api.nvim_set_hl(0, 'MiniCompleteSnippet', { fg = '#f38ba8', default = true })
-  vim.api.nvim_set_hl(0, 'MiniCompleteSnippetSelected', { bg = '#45475a', fg = '#f38ba8', bold = true, default = true })
+local defaults = {
+  -- Wait this long after the last keystroke before asking the server(s).
+  debounce_ms = 30,
+  -- Characters of the current word needed before completion opens.
+  min_prefix = 1,
+  -- Open right after these tokens with no word typed yet (e.g. `obj.`), when the server also
+  -- advertises the character as a trigger. Servers advertise far more (space, "(", ",", "=" ...),
+  -- which would open the bar on almost every key, so this is an allowlist. false to disable.
+  -- Lua users may want to add ":" (method calls); in C#/TS it fires on `case x:` and ternaries.
+  trigger_characters = { '.', '->', '::' },
+  -- Max time accept() waits for completionItem/resolve (auto-import edits often arrive there).
+  resolve_timeout_ms = 300,
+  -- Return false to disable completion in a buffer. Default: normal and acwrite buffers only.
+  enabled = function(bufnr)
+    local bt = vim.bo[bufnr].buftype
+    return bt == '' or bt == 'acwrite'
+  end,
+  exclude_filetypes = {},
+  -- Mix LuaSnip snippets (if LuaSnip is installed) into the list, and expand LSP snippets with it.
+  -- When false, LSP snippets are expanded with the built-in vim.snippet.
+  luasnip = true,
+  -- vim.notify when a completion-capable LSP server attaches (once per server).
+  notify_on_attach = false,
+  docs = {
+    max_height = 12,
+    border = 'rounded',
+  },
+  -- Insert-mode keys. Set any to false to leave that key alone. When the bar is closed every key
+  -- falls through to its normal behaviour.
+  keymaps = {
+    next = '<C-j>',
+    prev = '<C-k>',
+    accept = '<CR>',
+    cancel = '<Esc>',
+    toggle_docs = '<F6>',
+    focus_docs = '<F7>', -- move into the docs window (q / <Esc> to come back)
+    scroll_docs_down = '<C-f>',
+    scroll_docs_up = '<C-b>',
+    snippet_next = false, -- e.g. '<C-l>': jump to the next LuaSnip placeholder
+    snippet_prev = false, -- e.g. '<C-h>'
+  },
+  -- Highlight overrides, e.g. { MiniCompleteSelected = { bg = '#45475a', bold = true } }.
+  -- By default the groups link to your colorscheme's popup-menu groups.
+  highlights = {},
+}
+
+M.config = vim.deepcopy(defaults)
+
+local DEFAULT_LINKS = {
+  MiniCompleteNormal = 'Pmenu',
+  MiniCompleteSelected = 'PmenuSel',
+  MiniCompleteDocNormal = 'NormalFloat',
+  MiniCompleteDocBorder = 'FloatBorder',
+  MiniCompleteSnippet = 'Special',
+  MiniCompleteSnippetSelected = 'PmenuSel',
+}
+
+-- Re-applied on ColorScheme: `:colorscheme` runs `:hi clear`, which wipes groups defined at startup.
+local function apply_highlights()
+  for group, link in pairs(DEFAULT_LINKS) do
+    local override = M.config.highlights[group]
+    if override then
+      vim.api.nvim_set_hl(0, group, override)
+    else
+      vim.api.nvim_set_hl(0, group, { link = link, default = true })
+    end
+  end
 end
 
 local state = {
@@ -104,10 +163,29 @@ local function cancel_pending()
   end
 end
 
+-- A hidden scratch buffer, named so it is recognisable in :ls! and can never be "written":
+-- nofile + unmodifiable + no undo history.
+local function scratch_buf(name)
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.bo[buf].buftype = 'nofile'
+  vim.bo[buf].bufhidden = 'hide'
+  vim.bo[buf].swapfile = false
+  vim.bo[buf].undolevels = -1
+  vim.bo[buf].modifiable = false
+  pcall(vim.api.nvim_buf_set_name, buf, name)
+  return buf
+end
+
+local function set_buf_lines(buf, lines)
+  vim.bo[buf].modifiable = true
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  vim.bo[buf].modifiable = false
+  vim.bo[buf].modified = false
+end
+
 local function ensure_buf()
   if not state.buf or not vim.api.nvim_buf_is_valid(state.buf) then
-    state.buf = vim.api.nvim_create_buf(false, true)
-    vim.bo[state.buf].buftype = 'nofile'
+    state.buf = scratch_buf('mini-complete://bar')
   end
   return state.buf
 end
@@ -146,7 +224,7 @@ local function render()
     end
   end
 
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, { table.concat(parts) })
+  set_buf_lines(buf, { table.concat(parts) })
   vim.api.nvim_buf_clear_namespace(buf, NS, 0, -1)
   for _, hl in ipairs(highlights) do
     vim.api.nvim_buf_set_extmark(buf, NS, 0, hl[1], { end_col = hl[2], hl_group = hl[3] })
@@ -212,21 +290,21 @@ local function render_docs(lines)
   end
 
   if not (state.doc_buf and vim.api.nvim_buf_is_valid(state.doc_buf)) then
-    state.doc_buf = vim.api.nvim_create_buf(false, true)
-    vim.bo[state.doc_buf].buftype = 'nofile'
+    state.doc_buf = scratch_buf('mini-complete://docs')
+    vim.bo[state.doc_buf].filetype = 'markdown' -- LSP docs are usually Markdown
   end
-  vim.bo[state.doc_buf].modifiable = true
-  vim.api.nvim_buf_set_lines(state.doc_buf, 0, -1, false, lines)
-  vim.bo[state.doc_buf].modifiable = false
+  set_buf_lines(state.doc_buf, lines)
 
   local candidate_row = vim.o.lines - vim.o.cmdheight - 2
-  local available = candidate_row - DOC_GAP - 2
-  local height = math.min(#lines, 12, available)
+  local border = M.config.docs.border
+  local border_rows = (border == 'none' or border == '') and 0 or 2
+  local available = candidate_row - 1 - border_rows
+  local height = math.min(#lines, M.config.docs.max_height, available)
   if height < 1 then
     close_doc_window()
     return
   end
-  local row = candidate_row - DOC_GAP - height - 1
+  local row = candidate_row - 1 - height - border_rows + 1
   local width = vim.o.columns
 
   if state.doc_win and vim.api.nvim_win_is_valid(state.doc_win) then
@@ -241,7 +319,7 @@ local function render_docs(lines)
       style = 'minimal',
       focusable = false,
       zindex = 249,
-      border = 'rounded',
+      border = border,
     })
     vim.wo[state.doc_win].wrap = true
     vim.wo[state.doc_win].linebreak = true
@@ -315,8 +393,9 @@ local function completion_clients()
 end
 
 local function get_snippet_matches(prefix)
+  if not M.config.luasnip or prefix == '' then return {} end
   local ok, ls = pcall(require, 'luasnip')
-  if not ok or prefix == '' then return {} end
+  if not ok then return {} end
   local ft = vim.bo.filetype
   local raw = ls.get_snippets(ft) or {}
   local matches = {}
@@ -333,14 +412,35 @@ local function get_snippet_matches(prefix)
   return matches
 end
 
-local function in_member_access(start_col)
-  if start_col <= 0 then return false end
-  local line = vim.api.nvim_get_current_line()
-  local ch = line:sub(start_col, start_col)
-  return ch == '.' or ch == ':'
+-- Trigger characters advertised by the attached servers ("." , "::", "->", "<" ...).
+local function trigger_chars(clients)
+  local set = {}
+  for _, client in ipairs(clients) do
+    local provider = client.server_capabilities.completionProvider
+    for _, ch in ipairs(provider and provider.triggerCharacters or {}) do
+      set[ch] = true
+    end
+  end
+  return set
 end
 
-local function request_completion()
+-- If the text before byte column `col` (0-based) ends with an allowlisted trigger token whose last
+-- character the server advertises, return that character (it goes in the request context).
+local function trigger_before(col, server_triggers)
+  local tokens = M.config.trigger_characters
+  if not tokens then return nil end
+  local before = vim.api.nvim_get_current_line():sub(1, col)
+  for _, token in ipairs(tokens) do
+    local last = token:sub(-1)
+    if token ~= '' and before:sub(-#token) == token and server_triggers[last] then
+      return last
+    end
+  end
+  return nil
+end
+
+-- `trigger`: the trigger character that opened this request with no word typed yet (or nil).
+local function request_completion(trigger)
   cancel_pending()
   local this_request = state.request_id
   local bufnr = vim.api.nvim_get_current_buf()
@@ -352,7 +452,7 @@ local function request_completion()
     state.cancel_request = nil
 
     local prefix, start_col = get_prefix()
-    if prefix == '' then
+    if prefix == '' and not trigger then
       close_window()
       return
     end
@@ -365,7 +465,10 @@ local function request_completion()
         table.insert(filtered, item)
       end
     end
-    for _, snip_item in ipairs(in_member_access(start_col) and {} or get_snippet_matches(prefix)) do
+    -- No snippets in member access: `obj.fo`, `obj:fo`, `ptr->fo` should only offer members.
+    local char_before = vim.api.nvim_get_current_line():sub(start_col, start_col)
+    local member_access = start_col > 0 and char_before:match('[%.:>]') ~= nil
+    for _, snip_item in ipairs(member_access and {} or get_snippet_matches(prefix)) do
       table.insert(filtered, snip_item)
     end
     table.sort(filtered, function(a, b)
@@ -395,7 +498,9 @@ local function request_completion()
   end
 
   local params = function(client)
-    return vim.lsp.util.make_position_params(0, client.offset_encoding)
+    local p = vim.lsp.util.make_position_params(0, client.offset_encoding)
+    p.context = trigger and { triggerKind = 2, triggerCharacter = trigger } or { triggerKind = 1 }
+    return p
   end
   state.cancel_request = vim.lsp.buf_request_all(bufnr, 'textDocument/completion', params, function(results)
     local items = {}
@@ -414,9 +519,11 @@ local function request_completion()
   end)
 end
 
-local function schedule_completion()
+local function schedule_completion(trigger)
   debounce_timer:stop()
-  debounce_timer:start(DEBOUNCE_MS, 0, vim.schedule_wrap(request_completion))
+  debounce_timer:start(M.config.debounce_ms, 0, vim.schedule_wrap(function()
+    request_completion(trigger)
+  end))
 end
 
 function M.select_next()
@@ -516,7 +623,10 @@ local function to_byte_col(row, character, encoding)
 end
 
 local function expand_lsp_snippet(body)
-  local ok, ls = pcall(require, 'luasnip')
+  local ok, ls = false, nil
+  if M.config.luasnip then
+    ok, ls = pcall(require, 'luasnip')
+  end
   if ok then
     ls.lsp_expand(body) -- keeps your <C-l>/<C-h> LuaSnip jump mappings working
   else
@@ -549,7 +659,7 @@ function M.accept()
   -- Auto-import edits (additionalTextEdits) are often only sent on resolve.
   if client and not item.__resolved and not item.additionalTextEdits
       and client:supports_method('completionItem/resolve') then
-    local res = client:request_sync('completionItem/resolve', lsp_item(item), RESOLVE_TIMEOUT_MS, 0)
+    local res = client:request_sync('completionItem/resolve', lsp_item(item), M.config.resolve_timeout_ms, 0)
     if res and not res.err and res.result then
       -- merge, don't replace: the resolved copy lacks fields we filled in from itemDefaults
       item = vim.tbl_extend('force', item, res.result)
@@ -611,14 +721,31 @@ function M.cancel()
   close_window()
 end
 
-function M.setup()
-  set_default_highlights()
+local function buf_enabled(bufnr)
+  if vim.tbl_contains(M.config.exclude_filetypes, vim.bo[bufnr].filetype) then
+    return false
+  end
+  return M.config.enabled(bufnr) ~= false
+end
+
+--- Is the bar currently showing?
+function M.is_visible()
+  return state.active
+end
+
+---@param opts table|nil see `defaults` at the top of this file
+function M.setup(opts)
+  M.config = vim.tbl_deep_extend('force', vim.deepcopy(defaults), opts or {})
+  apply_highlights()
 
   local group = vim.api.nvim_create_augroup('MiniComplete', { clear = true })
+
+  vim.api.nvim_create_autocmd('ColorScheme', { group = group, callback = apply_highlights })
 
   vim.api.nvim_create_autocmd('LspAttach', {
     group = group,
     callback = function(args)
+      if not M.config.notify_on_attach then return end
       local client = vim.lsp.get_client_by_id(args.data.client_id)
       -- once per client, not once per buffer it attaches to
       if client and not state.notified_clients[client.id] and client:supports_method('textDocument/completion') then
@@ -636,13 +763,21 @@ function M.setup()
 
   vim.api.nvim_create_autocmd('TextChangedI', {
     group = group,
-    callback = function()
+    callback = function(args)
       -- Ignore changes made by accept() itself (and async follow-ups like server commands),
-      -- otherwise the popup reopens on the word you just completed.
-      if state.just_accepted then return end
-      local prefix = get_prefix()
-      if #prefix >= 1 then
-        schedule_completion()
+      -- otherwise the bar reopens on the word you just completed.
+      if state.just_accepted or not buf_enabled(args.buf) then return end
+      local prefix, start_col = get_prefix()
+      if #prefix >= math.max(1, M.config.min_prefix) then
+        schedule_completion(nil)
+      elseif prefix == '' then
+        local trigger = trigger_before(start_col, trigger_chars(completion_clients()))
+        if trigger then
+          schedule_completion(trigger)
+          return
+        end
+        cancel_pending()
+        close_window()
       else
         cancel_pending()
         close_window()
@@ -672,86 +807,45 @@ function M.setup()
     end,
   })
 
-  vim.keymap.set('i', '<C-j>', function()
-    if state.active then
-      M.select_next()
-    else
-      feed('<C-j>')
+  local keys = M.config.keymaps
+  -- Map `lhs` in insert mode: run `fn` when `active()` is true, otherwise behave like the plain key.
+  local function map(lhs, active, fn, desc)
+    if not lhs then return end
+    vim.keymap.set('i', lhs, function()
+      if active() then
+        fn()
+      else
+        feed(lhs)
+      end
+    end, { desc = 'mini_complete: ' .. desc })
+  end
+  local function visible() return state.active end
+  local function docs_open() return state.active and state.docs_shown and state.doc_win ~= nil end
+  local function luasnip_jumpable(dir)
+    return function()
+      local ok, ls = pcall(require, 'luasnip')
+      return ok and ls.jumpable(dir)
     end
-  end)
+  end
 
-  vim.keymap.set('i', '<C-k>', function()
-    if state.active then
-      M.select_prev()
-    else
-      feed('<C-k>')
-    end
-  end)
-
-  vim.keymap.set('i', '<CR>', function()
-    if state.active then
-      M.accept()
-    else
-      feed('<CR>')
-    end
-  end)
-
-  vim.keymap.set('i', '<Esc>', function()
-    if state.active then
-      M.cancel()
-    end
-    feed('<Esc>')
-  end)
-
-  vim.keymap.set('i', '<F6>', function()
-    if state.active then
-      M.toggle_docs()
-    else
-      feed('<F6>')
-    end
-  end)
-
-  vim.keymap.set('i', '<F7>', function()
-    if state.active and state.docs_shown then
-      M.focus_docs()
-    else
-      feed('<F7>')
-    end
-  end)
-
-  vim.keymap.set('i', '<C-f>', function()
-    if state.active and state.docs_shown and state.doc_win then
-      scroll_docs(1)
-    else
-      feed('<C-f>')
-    end
-  end)
-
-  vim.keymap.set('i', '<C-b>', function()
-    if state.active and state.docs_shown and state.doc_win then
-      scroll_docs(-1)
-    else
-      feed('<C-b>')
-    end
-  end)
-
-  vim.keymap.set('i', '<C-l>', function()
-    local ok, ls = pcall(require, 'luasnip')
-    if ok and ls.jumpable(1) then
-      ls.jump(1)
-    else
-      feed('<C-l>')
-    end
-  end)
-
-  vim.keymap.set('i', '<C-h>', function()
-    local ok, ls = pcall(require, 'luasnip')
-    if ok and ls.jumpable(-1) then
-      ls.jump(-1)
-    else
-      feed('<C-h>')
-    end
-  end)
+  map(keys.next, visible, M.select_next, 'next item')
+  map(keys.prev, visible, M.select_prev, 'previous item')
+  map(keys.accept, visible, M.accept, 'accept')
+  map(keys.toggle_docs, visible, M.toggle_docs, 'toggle docs')
+  map(keys.focus_docs, docs_open, M.focus_docs, 'focus docs')
+  map(keys.scroll_docs_down, docs_open, function() scroll_docs(1) end, 'scroll docs down')
+  map(keys.scroll_docs_up, docs_open, function() scroll_docs(-1) end, 'scroll docs up')
+  map(keys.snippet_next, luasnip_jumpable(1), function() require('luasnip').jump(1) end, 'next snippet placeholder')
+  map(keys.snippet_prev, luasnip_jumpable(-1), function() require('luasnip').jump(-1) end, 'previous snippet placeholder')
+  if keys.cancel then
+    -- Cancel closes the bar *and* still does the key's normal job (leaving insert mode for <Esc>).
+    vim.keymap.set('i', keys.cancel, function()
+      if state.active then
+        M.cancel()
+      end
+      feed(keys.cancel)
+    end, { desc = 'mini_complete: cancel' })
+  end
 end
 
 return M

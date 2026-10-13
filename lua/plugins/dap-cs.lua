@@ -23,7 +23,10 @@ return {
 
             dap.adapters.coreclr = {
                 type = "executable",
-                command = vim.fn.stdpath("data") .. "/mason/bin/netcoredbg",
+                -- On Windows Mason installs a netcoredbg.cmd shim; exepath() resolves the
+                -- extension (Mason's bin dir is on PATH), a bare path without .cmd fails to spawn.
+                command = vim.fn.exepath("netcoredbg") ~= "" and vim.fn.exepath("netcoredbg")
+                    or (vim.fn.stdpath("data") .. "/mason/bin/netcoredbg"),
                 args = { "--interpreter=vscode" },
             }
 
@@ -51,7 +54,7 @@ return {
             vim.keymap.set("n", "<F5>", dap.continue)
             vim.keymap.set("n", "<F10>", dap.step_over)
             vim.keymap.set("n", "<F11>", dap.step_into)
-            vim.keymap.set("n", "<F12>", dap.step_out)
+            vim.keymap.set("n", "<S-F11>", dap.step_out) -- Visual Studio's binding; <F12> is go-to-definition
             vim.keymap.set("n", "<leader>b", dap.toggle_breakpoint)
         end,
     },

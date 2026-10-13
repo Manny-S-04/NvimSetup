@@ -1,20 +1,11 @@
 -- Owns the "jira issue" buffer: creating, rendering, refreshing, and the actions
 -- you can take on an issue from inside it.
+local config = require("jira.config")
 local issues = require("jira.api.issues")
 local render = require("jira.ui.render")
 local util = require("jira.ui.util")
 
 local M = {}
-
-local HELP = {
-  "jira.nvim issue buffer",
-  "  s     change status (transition)",
-  "  c     add a comment",
-  "  a     assign to me",
-  "  gx    open in browser",
-  "  r     refresh",
-  "  q     close",
-}
 
 local function buf_name(key)
   return "jira://" .. key
@@ -40,7 +31,7 @@ function M.refresh(bufnr, on_done)
   local key = vim.b[bufnr].jira_issue_key
 
   if not key then
-    vim.notify("jira.nvim: this buffer is not a Jira issue buffer", vim.log.levels.ERROR)
+    vim.notify("jira.nvim: this buffer is not a Jira issue buffer", vim.log.levels.WARN)
     return
   end
 
@@ -101,6 +92,17 @@ function M.assign_to_me(bufnr)
   end)
 end
 
+function M.unassign(bufnr)
+  local key = vim.b[bufnr].jira_issue_key
+  issues.unassign(key, function(ok, err)
+    if not ok then
+      return util.notify_error("could not unassign " .. key, err)
+    end
+    vim.notify("jira.nvim: unassigned " .. key)
+    M.refresh(bufnr)
+  end)
+end
+
 function M.comment(bufnr)
   local key = vim.b[bufnr].jira_issue_key
   require("jira.ui.comment").open(key, function()
@@ -115,25 +117,43 @@ function M.open_in_browser(bufnr)
   end
 end
 
+-- action name -> { function, description }, in the order shown by the help key
+local ACTIONS = {
+  { "status", M.change_status, "change status (transition)" },
+  { "comment", M.comment, "add a comment" },
+  { "assign_me", M.assign_to_me, "assign to me" },
+  { "unassign", M.unassign, "unassign" },
+  { "browser", M.open_in_browser, "open in browser" },
+  { "refresh", M.refresh, "refresh" },
+  {
+    "close",
+    function(bufnr)
+      vim.api.nvim_buf_delete(bufnr, { force = true })
+    end,
+    "close",
+  },
+}
+
 local function setup_keymaps(bufnr)
-  local function map(lhs, fn, desc)
-    vim.keymap.set("n", lhs, function()
-      fn(bufnr)
-    end, { buffer = bufnr, nowait = true, silent = true, desc = desc })
+  local keys = (config.options.keymaps or {}).issue or {}
+  local help = { "jira.nvim issue buffer" }
+
+  for _, action in ipairs(ACTIONS) do
+    local name, fn, desc = action[1], action[2], action[3]
+    local lhs = keys[name]
+    if lhs then
+      vim.keymap.set("n", lhs, function()
+        fn(bufnr)
+      end, { buffer = bufnr, nowait = true, silent = true, desc = "Jira: " .. desc })
+      table.insert(help, ("  %-6s %s"):format(lhs, desc))
+    end
   end
 
-  map("q", function()
-    vim.api.nvim_buf_delete(bufnr, { force = true })
-  end, "Close Jira issue buffer")
-  map("r", M.refresh, "Refresh Jira issue")
-  map("<leader>jr", M.refresh, "Refresh Jira issue")
-  map("s", M.change_status, "Change Jira issue status")
-  map("c", M.comment, "Comment on Jira issue")
-  map("a", M.assign_to_me, "Assign Jira issue to me")
-  map("gx", M.open_in_browser, "Open Jira issue in browser")
-  map("g?", function()
-    vim.notify(table.concat(HELP, "\n"))
-  end, "Jira issue help")
+  if keys.help then
+    vim.keymap.set("n", keys.help, function()
+      vim.notify(table.concat(help, "\n"))
+    end, { buffer = bufnr, nowait = true, silent = true, desc = "Jira: help" })
+  end
 end
 
 --- Open (or focus, if already open) a buffer showing the given issue.
@@ -154,7 +174,7 @@ end
 function M.open_key(key)
   local valid, key_err = issues.validate_key(key)
   if not valid then
-    vim.notify("jira.nvim: " .. key_err, vim.log.levels.ERROR)
+    vim.notify("jira.nvim: " .. key_err, vim.log.levels.WARN)
     return
   end
   vim.notify("jira.nvim: loading " .. key .. "…")

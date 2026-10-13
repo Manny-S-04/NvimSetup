@@ -1,7 +1,6 @@
 return {
   "nvim-neotest/neotest",
   dependencies = {
-    "antoinemadec/FixCursorHold.nvim",
     "nvim-neotest/nvim-nio",
     { "stevanfreeborn/neotest-playwright", branch = "fork" },
     "issafalcon/neotest-dotnet",
@@ -14,6 +13,7 @@ return {
         follow = false,
       },
       adapters = {
+        require("neotest-dotnet"),
         require("neotest-playwright").adapter({
           options = {
             persist_project_selection = true,

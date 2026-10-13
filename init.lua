@@ -25,9 +25,7 @@ vim.opt.rtp:prepend(lazypath)
 vim.api.nvim_create_user_command("History", function(opts)
   local ticket = opts.args
 
-  local commit = vim.fn.system(
-    'git log --grep="' .. ticket .. '" -1 --format="%H"'
-  ):gsub("\n", "")
+  local commit = vim.fn.system({ "git", "log", "--grep=" .. ticket, "-1", "--format=%H" }):gsub("\n", "")
 
   if commit == "" then
     vim.notify("No commit found for " .. ticket, vim.log.levels.WARN)
@@ -105,8 +103,7 @@ function Add(paths)
     end
 
     for _, path in ipairs(paths) do
-        local cmd = "git add " .. path
-        local result = vim.fn.system(cmd)
+        local result = vim.fn.system({ "git", "add", path })
         print(result)
     end
 end
@@ -126,8 +123,7 @@ function Restore(paths)
     end
 
     for _, path in ipairs(paths) do
-        local cmd = "git restore " .. path
-        local result = vim.fn.system(cmd)
+        local result = vim.fn.system({ "git", "restore", path })
         print(result)
     end
 end
@@ -142,14 +138,12 @@ end, {nargs = "+"})
 
 function ClearBuffers(buffers)
     if type(buffers) ~= "table" then
-        print("Error: Restore expects a table of paths")
+        print("Error: ClearBuffers expects a table of buffer names/numbers")
         return
     end
 
     for _, path in ipairs(buffers) do
-        local cmd = "bd! " .. path
-        local result = vim.cmd(cmd)
-        print(result)
+        vim.cmd("bd! " .. path)
     end
 end
 
@@ -170,17 +164,23 @@ vim.api.nvim_create_user_command("LSB", function()
 end, {})
 
 local function open_scratch_buffer(lines, title)
+    local name = title or "[Scratch]"
+    local existing = vim.fn.bufnr(name)
+    if existing ~= -1 then
+        vim.api.nvim_buf_delete(existing, { force = true })
+    end
+
     local buf = vim.api.nvim_create_buf(false, true)
 
-    vim.api.nvim_buf_set_name(buf, title or "[Scratch]")
+    vim.api.nvim_buf_set_name(buf, name)
 
     vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
 
     vim.api.nvim_command("topleft split")
     vim.api.nvim_win_set_buf(0, buf)
 
-    vim.api.nvim_buf_set_option(buf, "modifiable", false)
-    vim.api.nvim_buf_set_option(buf, "bufhidden", "wipe")
+    vim.bo[buf].modifiable = false
+    vim.bo[buf].bufhidden = "wipe"
 end
 
 vim.api.nvim_create_user_command("Glame", function(opts)
@@ -244,17 +244,17 @@ local function open_repl(cmd, title)
     local win = vim.api.nvim_get_current_win()
     vim.api.nvim_win_set_buf(win, buf)
 
-    vim.fn.termopen(cmd)
+    vim.fn.jobstart(cmd, { term = true })
 
     vim.bo[buf].bufhidden = "wipe"
 end
 
 vim.api.nvim_create_user_command("Node", function()
-    open_repl("Node", "[Node Terminal]")
+    open_repl("node", "[Node Terminal]")
 end, { range = true })
 
 vim.api.nvim_create_user_command("Python", function()
-    open_repl("Python", "[Python Terminal]")
+    open_repl("python", "[Python Terminal]")
 end, { range = true })
 
 vim.api.nvim_create_user_command("Log", function(opts)
@@ -307,7 +307,6 @@ end, {
 
 require("vim-options")
 require("lazy").setup("plugins")
-require('mini_complete').setup()
 
 local resize_mode_active = false
 
@@ -334,4 +333,3 @@ local function enter_resize_mode()
 end
 
 vim.keymap.set("n", "<leader>r", enter_resize_mode)
-require('jira').setup()

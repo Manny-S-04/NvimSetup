@@ -69,7 +69,10 @@ end
 function M.show(bufnr)
   local winid = vim.fn.bufwinid(bufnr)
   if winid == -1 then
-    vim.cmd.split()
+    local open_cmd = require("jira.config").options.open_cmd or "split"
+    if open_cmd ~= "edit" then
+      vim.cmd(open_cmd)
+    end
     vim.api.nvim_win_set_buf(0, bufnr)
   else
     vim.api.nvim_set_current_win(winid)

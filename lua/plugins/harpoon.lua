@@ -3,8 +3,7 @@ return{
     branch = "harpoon2",
     dependencies = { "nvim-telescope/telescope.nvim" , "nvim-lua/plenary.nvim" },
     config = function ()
-        require("harpoon"):setup({})
-        local harpoon = require('harpoon')
+        local harpoon = require("harpoon")
         harpoon:setup()
         vim.keymap.set("n", "<leader>ha", function () harpoon:list():add() end)
         vim.keymap.set("n", "<leader>hm", function () harpoon.ui:toggle_quick_menu(harpoon:list())   end)
