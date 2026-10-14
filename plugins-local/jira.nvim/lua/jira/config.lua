@@ -13,6 +13,8 @@ local defaults = {
   -- JQL behind :JiraMine
   jql_mine = "assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC",
   max_results = 50,
+  -- Board :JiraBoard opens with no argument (the number in .../boards/19). nil = pick from a list.
+  board = nil,
   -- Field holding the sprint. customfield_10020 on Jira Cloud; on Server/DC it differs per
   -- instance (find it at /rest/api/2/field, the one with "schema.custom" ending in ":gh-sprint").
   sprint_field = "customfield_10020",

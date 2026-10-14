@@ -3,6 +3,8 @@
 return {
     dir = vim.fn.stdpath("config") .. "/plugins-local/jira.nvim",
     name = "jira.nvim",
-    cmd = { "Jira", "JiraMine", "JiraIssue", "JiraSearch", "JiraRefresh" },
-    opts = {},
+    cmd = { "Jira", "JiraMine", "JiraIssue", "JiraSearch", "JiraBoard", "JiraRefresh" },
+    opts = {
+        board = 19, -- work's CV board: :JiraBoard with no argument opens it
+    },
 }

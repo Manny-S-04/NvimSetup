@@ -14,6 +14,8 @@ PROJ-2   In Progress  Add retry to payment client
 ## Features
 
 - `:JiraMine` / `:JiraSearch <JQL>` — issue lists (any JQL), status coloured by category
+- `:JiraBoard [ID]` — exactly what a board page shows: the active sprint on a scrum board, open work
+  on a kanban board, in board order
 - `:JiraIssue [KEY]` — open a ticket; with no argument it uses the key under the cursor
   (commit messages, branch names, TODO comments)
 - In a ticket: change status (only the transitions your workflow allows), comment, assign to me,
@@ -37,7 +39,7 @@ PROJ-2   In Progress  Add retry to payment client
 ```lua
 {
   "<your-github-user>/jira.nvim",
-  cmd = { "Jira", "JiraMine", "JiraIssue", "JiraSearch", "JiraRefresh" },
+  cmd = { "Jira", "JiraMine", "JiraIssue", "JiraSearch", "JiraBoard", "JiraRefresh" },
   opts = {},
 }
 ```
@@ -90,6 +92,8 @@ require("jira").setup({
   timeout = 10000,  -- ms per request
   jql_mine = "assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC",
   max_results = 50,
+  -- Board :JiraBoard opens with no argument: the number in .../boards/19. nil = pick from a list.
+  board = nil,
   -- Sprint field. Cloud: customfield_10020. Server/DC: varies per instance — find it at
   -- <url>/rest/api/2/field (the field whose schema.custom ends in ":gh-sprint").
   sprint_field = "customfield_10020",
@@ -110,6 +114,7 @@ require("jira").setup({
 |---|---|
 | `:JiraMine` | Your open issues (`jql_mine`) |
 | `:JiraSearch <JQL>` | Any search, e.g. `:JiraSearch project = PROJ AND sprint in openSprints()` |
+| `:JiraBoard [ID]` | A board's current view. `ID` is the number in `…/boards/19` (a pasted board URL works too); with no `ID`, uses `board` from the config, or lets you pick from your boards |
 | `:JiraIssue [KEY]` | Open an issue (defaults to the key under the cursor) |
 | `:JiraRefresh` | Refresh the current issue buffer |
 | `:Jira` | Help, and which instance you're connected to |
@@ -118,6 +123,11 @@ In an **issue** buffer: `s` status · `c` comment · `a` assign to me · `A` una
 `r` refresh · `q` close · `g?` help.
 
 In a **list** buffer: `<CR>` open · `gx` browser · `r` refresh · `q` close.
+
+**Boards** use the Jira Software Agile API (`/rest/agile/1.0`), which Cloud and Server/DC both have.
+A scrum board shows `sprint in openSprints()` and the sprint name and end date in the title.
+A kanban board shows unfinished work plus anything resolved in the last 14 days, close to what
+Jira's own board shows. Lists stop at 500 issues.
 
 **Comments** open in a scratch buffer: write Markdown-ish text (blank line = new paragraph),
 `:w` to post, `:q!` to cancel. If posting fails, your text stays in the buffer.

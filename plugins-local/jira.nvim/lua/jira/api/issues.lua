@@ -66,6 +66,7 @@ local function fields()
   return BASE_FIELDS
 end
 local LIST_FIELDS = "summary,status,assignee,priority,issuetype,updated"
+M.LIST_FIELDS = LIST_FIELDS
 
 local function sprint_name(s)
   if type(s) == "table" then
@@ -133,6 +134,9 @@ local function from_response(raw)
     raw = raw,
   }
 end
+
+--- Raw REST issue -> the plugin's issue table (shared with the boards API).
+M.from_response = from_response
 
 --- Fetch a single issue by key.
 function M.get(key, cb)
