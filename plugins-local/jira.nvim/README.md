@@ -125,7 +125,7 @@ In an **issue** buffer: `s` status · `c` comment · `a` assign to me · `A` una
 In a **list** buffer: `<CR>` open · `gx` browser · `r` refresh · `q` close.
 
 **Boards** use the Jira Software Agile API (`/rest/agile/1.0`), which Cloud and Server/DC both have.
-A scrum board shows `sprint in openSprints()` and the sprint name and end date in the title.
+A scrum board shows only its active sprint(s) (not planned future ones), with the sprint name and end date in the title.
 A kanban board shows unfinished work plus anything resolved in the last 14 days, close to what
 Jira's own board shows. Lists stop at 500 issues.
 

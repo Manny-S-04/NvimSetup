@@ -41,7 +41,7 @@ describe("jira.api.boards", function()
     assert.are.equal("CV-1", got[1].key)
     assert.are.equal("CV board: Sprint 42 — ends 2026-10-20", title)
     assert.are.equal("active", calls[2].query.state)
-    assert.are.equal("sprint in openSprints()", calls[3].query.jql)
+    assert.are.equal("sprint in (7)", calls[3].query.jql)
     assert.is_truthy(calls[1].path:match("^/rest/agile/1%.0/board/19$"))
   end)
 

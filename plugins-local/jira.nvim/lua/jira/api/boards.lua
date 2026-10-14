@@ -119,7 +119,12 @@ function M.board_view(board_id, cb)
       if #sprints == 0 then
         return cb({}, nil, title)
       end
-      M.issues(board_id, "sprint in openSprints()", function(list, ierr)
+      -- Ask for these sprint ids, not openSprints(): that also matches future (planned) sprints.
+      local ids = {}
+      for _, s in ipairs(sprints) do
+        table.insert(ids, tostring(s.id))
+      end
+      M.issues(board_id, ("sprint in (%s)"):format(table.concat(ids, ",")), function(list, ierr)
         cb(list, ierr, title)
       end)
     end)

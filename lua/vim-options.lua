@@ -151,3 +151,7 @@ vim.api.nvim_set_keymap(
     "<Nop>",
      { noremap = true, silent = true}
 )
+
+-- Never show the tab bar. Diffview (Space gd / gh) opens in its own tab page; Space gq or :tabclose closes it,
+-- gt / gT switch tabs if you need to.
+vim.opt.showtabline = 0
