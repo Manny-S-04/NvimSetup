@@ -21,6 +21,9 @@ local function render_into(bufnr, issue)
   vim.b[bufnr].jira_issue_url = issues.browse_url(issue.key)
 
   util.set_readonly(bufnr, true)
+  pcall(function()
+    require("jira.worklist").update(issue) -- keep the worklist's status column current
+  end)
 end
 
 --- Re-fetch and re-render the issue shown in the given buffer.
@@ -117,6 +120,31 @@ function M.open_in_browser(bufnr)
   end
 end
 
+function M.open_parent(bufnr)
+  local key = vim.b[bufnr].jira_issue_key
+  require("jira.api.hierarchy").parent(key, function(parent, err)
+    if err then
+      return util.notify_error("could not read " .. key, err)
+    end
+    if not parent then
+      return vim.notify("jira.nvim: " .. key .. " has no parent", vim.log.levels.WARN)
+    end
+    M.open_key(parent.key)
+  end)
+end
+
+function M.open_children(bufnr)
+  require("jira.ui.list").open_children(vim.b[bufnr].jira_issue_key)
+end
+
+function M.work(bufnr)
+  require("jira.worklist").work(vim.b[bufnr].jira_issue_key)
+end
+
+function M.worklist_add(bufnr)
+  require("jira.worklist").add({ key = vim.b[bufnr].jira_issue_key })
+end
+
 -- action name -> { function, description }, in the order shown by the help key
 local ACTIONS = {
   { "status", M.change_status, "change status (transition)" },
@@ -124,6 +152,10 @@ local ACTIONS = {
   { "assign_me", M.assign_to_me, "assign to me" },
   { "unassign", M.unassign, "unassign" },
   { "browser", M.open_in_browser, "open in browser" },
+  { "parent", M.open_parent, "open the parent" },
+  { "children", M.open_children, "list child tickets" },
+  { "work", M.work, "worklist = the parent's tickets (:JiraWork)" },
+  { "worklist_add", M.worklist_add, "add to the worklist" },
   { "refresh", M.refresh, "refresh" },
   {
     "close",
@@ -159,19 +191,20 @@ end
 --- Open (or focus, if already open) a buffer showing the given issue.
 ---@param issue table as returned by jira.api.issues.get
 ---@return integer bufnr
-function M.open(issue)
+function M.open(issue, opts)
   util.setup_highlight_groups()
 
   local bufnr = util.named_scratch(buf_name(issue.key), "jira-issue")
   render_into(bufnr, issue)
   setup_keymaps(bufnr)
-  util.show(bufnr)
+  util.show(bufnr, opts)
 
   return bufnr
 end
 
 --- Fetch an issue asynchronously and open it.
-function M.open_key(key)
+---@param opts table|nil { reuse_window = boolean } (see jira.ui.util.show)
+function M.open_key(key, opts)
   local valid, key_err = issues.validate_key(key)
   if not valid then
     vim.notify("jira.nvim: " .. key_err, vim.log.levels.WARN)
@@ -182,7 +215,7 @@ function M.open_key(key)
     if not issue then
       return util.notify_error("failed to fetch " .. key, err)
     end
-    M.open(issue)
+    M.open(issue, opts)
   end)
 end
 

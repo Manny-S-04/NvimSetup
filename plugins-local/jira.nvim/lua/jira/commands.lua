@@ -38,12 +38,24 @@ local function cmd_jira_search(cmd_opts)
   if not ensure_configured() then
     return
   end
-  local jql = vim.trim(cmd_opts.args or "")
-  if jql == "" then
-    vim.notify("jira.nvim: usage :JiraSearch <JQL>", vim.log.levels.WARN)
+  local input = vim.trim(cmd_opts.args or "")
+  if input == "" then
+    return require("jira.ui.find").open()
+  end
+  require("jira.ui.list").open("Search: " .. input, require("jira.jql").from_freeform(input))
+end
+
+local function cmd_jira_find(cmd_opts)
+  if not ensure_configured() then
     return
   end
-  require("jira.ui.list").open("Search: " .. jql, jql)
+  local name = vim.trim(cmd_opts.args or "")
+  if name == "" then
+    return require("jira.ui.find").open()
+  end
+  if not require("jira.ui.find").run_preset(name) then
+    vim.notify(("jira.nvim: no preset %q (see :JiraFind → Presets…)"):format(name), vim.log.levels.WARN)
+  end
 end
 
 local function open_board(id)
@@ -88,6 +100,72 @@ local function cmd_jira_board(cmd_opts)
   end)
 end
 
+--- KEY from the args, else the issue buffer you're in, else the key under the cursor.
+local function key_arg(cmd_opts)
+  local key = vim.trim(cmd_opts.args or "")
+  if key == "" then
+    key = vim.b.jira_issue_key or key_under_cursor() or ""
+  end
+  return key ~= "" and key:upper() or nil
+end
+
+local function with_key(usage, fn)
+  return function(cmd_opts)
+    if not ensure_configured() then
+      return
+    end
+    local key = key_arg(cmd_opts)
+    if not key then
+      return vim.notify("jira.nvim: usage " .. usage, vim.log.levels.WARN)
+    end
+    local ok, err = require("jira.api.issues").validate_key(key)
+    if not ok then
+      return vim.notify("jira.nvim: " .. err, vim.log.levels.WARN)
+    end
+    fn(key)
+  end
+end
+
+local cmd_jira_children = with_key(":JiraChildren [KEY]", function(key)
+  require("jira.ui.list").open_children(key)
+end)
+
+local cmd_jira_parent = with_key(":JiraParent [KEY]", function(key)
+  require("jira.api.hierarchy").parent(key, function(parent, err)
+    if err then
+      return require("jira.ui.util").notify_error("could not read " .. key, err)
+    end
+    if not parent then
+      return vim.notify("jira.nvim: " .. key .. " has no parent", vim.log.levels.WARN)
+    end
+    require("jira.ui.issue").open_key(parent.key)
+  end)
+end)
+
+local cmd_jira_work = with_key(":JiraWork [KEY]", function(key)
+  require("jira.worklist").work(key)
+end)
+
+local function cmd_jira_worklist(cmd_opts)
+  local sub = vim.trim(cmd_opts.args or "")
+  local wl = require("jira.worklist")
+  if sub == "" then
+    wl.open()
+  elseif sub == "refresh" then
+    if ensure_configured() then
+      wl.refresh()
+    end
+  elseif sub == "add" then
+    wl.add()
+  elseif sub == "next" then
+    wl.next()
+  elseif sub == "prev" then
+    wl.prev()
+  else
+    vim.notify("jira.nvim: usage :JiraWorklist [refresh|add|next|prev]", vim.log.levels.WARN)
+  end
+end
+
 local function cmd_jira_refresh()
   require("jira.ui.issue").refresh(vim.api.nvim_get_current_buf())
 end
@@ -98,10 +176,15 @@ local function cmd_jira_help()
     "",
     "Commands:",
     "  :JiraMine            Your open issues",
-    "  :JiraSearch <JQL>    Issues matching a JQL query",
+    "  :JiraFind [PRESET]   Build a query from menus (no JQL needed), or run a saved preset",
+    "  :JiraSearch [JQL]    Issues matching JQL; a bare KEY or plain words also work; no arg = :JiraFind",
     "  :JiraBoard [ID]      What a board shows (active sprint / open work); no ID = pick one",
     "  :JiraIssue [KEY]     Open an issue (defaults to the key under the cursor)",
     "  :JiraRefresh         Refresh the current issue buffer",
+    "  :JiraParent [KEY]    Open KEY's parent",
+    "  :JiraChildren [KEY]  List KEY's child tickets",
+    "  :JiraWork [KEY]      Worklist = KEY's parent's child tickets (needs harpoon)",
+    "  :JiraWorklist [sub]  Open the worklist; refresh | add | next | prev",
     "",
     "In a list / an issue: press the help key (default g?) in an issue buffer for its keys.",
     "",
@@ -122,8 +205,15 @@ function M.setup()
     nargs = 0,
     desc = "List Jira issues assigned to you",
   })
+  vim.api.nvim_create_user_command("JiraFind", cmd_jira_find, {
+    nargs = "?",
+    complete = function()
+      return require("jira.presets").names()
+    end,
+    desc = "Build a Jira query from menus, or run a saved preset",
+  })
   vim.api.nvim_create_user_command("JiraSearch", cmd_jira_search, {
-    nargs = "+",
+    nargs = "*",
     desc = "List Jira issues matching JQL",
   })
   vim.api.nvim_create_user_command("JiraBoard", cmd_jira_board, {
@@ -133,6 +223,25 @@ function M.setup()
   vim.api.nvim_create_user_command("JiraRefresh", cmd_jira_refresh, {
     nargs = 0,
     desc = "Refresh the current Jira issue buffer",
+  })
+  vim.api.nvim_create_user_command("JiraParent", cmd_jira_parent, {
+    nargs = "?",
+    desc = "Open the parent of a Jira issue",
+  })
+  vim.api.nvim_create_user_command("JiraChildren", cmd_jira_children, {
+    nargs = "?",
+    desc = "List the child tickets of a Jira issue",
+  })
+  vim.api.nvim_create_user_command("JiraWork", cmd_jira_work, {
+    nargs = "?",
+    desc = "Make the parent's child tickets your worklist",
+  })
+  vim.api.nvim_create_user_command("JiraWorklist", cmd_jira_worklist, {
+    nargs = "?",
+    complete = function()
+      return { "refresh", "add", "next", "prev" }
+    end,
+    desc = "Open / refresh / step through the Jira worklist",
   })
   vim.api.nvim_create_user_command("Jira", cmd_jira_help, {
     nargs = 0,

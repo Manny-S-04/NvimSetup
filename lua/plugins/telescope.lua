@@ -21,7 +21,7 @@ return {
             vim.keymap.set("n", "<leader>ds", builtin.lsp_document_symbols, { desc = "Document symbols (outline)" })
             vim.keymap.set({"n", "v"}, "<leader>gr", builtin.lsp_references, { desc = "Find all references" })
             vim.keymap.set("n", "<A-F2>", builtin.lsp_implementations, { desc = "Go to implementation" })
-            vim.keymap.set("n", "<F12>", builtin.lsp_definitions, { desc = "Go to definition (F12)" })
+            -- <F12> lives in lua/crash-guard.lua (native LSP jump + crash breadcrumb).
             vim.keymap.set("n", "<leader>le",
                 function ()
                     builtin.diagnostics({

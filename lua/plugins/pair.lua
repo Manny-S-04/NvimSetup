@@ -21,6 +21,7 @@ local spec = {
         { "<leader>pl", "<cmd>PairLast<CR>", desc = "pair: last result" },
         { "<leader>pp", "<cmd>PairProvider<CR>", desc = "pair: LLM for jobs" },
         { "<leader>pP", "<cmd>PairProvider!<CR>", desc = "pair: LLM for ghost text" },
+        { "<leader>pt", "<cmd>PairTeach<CR>", desc = "pair: teach it a rule (stop repeating a mistake)" },
     },
 }
 

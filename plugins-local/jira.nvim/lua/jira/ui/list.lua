@@ -7,6 +7,8 @@ local M = {}
 
 -- bufnr -> function(cb) that fetches the list: cb(issues, err, title?). Functions can't live in vim.b.
 local fetchers = {}
+-- bufnr -> the issues last shown, for "make this the worklist"
+local shown = {}
 
 local function key_under_cursor(bufnr)
   local keys = vim.b[bufnr].jira_list_keys or {}
@@ -38,6 +40,7 @@ local function load(bufnr)
       return util.notify_error("search failed", err)
     end
 
+    shown[bufnr] = results
     local lines, highlights, keys = render.render_list(title, results)
     util.set_lines(bufnr, lines)
     util.apply_highlights(bufnr, highlights)
@@ -78,6 +81,23 @@ local function setup_keymaps(bufnr)
   map("refresh", function()
     load(bufnr)
   end, "refresh list")
+  map("worklist", function()
+    local list = shown[bufnr]
+    if list and #list > 0 then
+      require("jira.worklist").set(list, vim.b[bufnr].jira_list_title)
+    end
+  end, "make this list the worklist")
+  map("worklist_add", function()
+    local key = key_under_cursor(bufnr)
+    if key then
+      for _, issue in ipairs(shown[bufnr] or {}) do
+        if issue.key == key then
+          return require("jira.worklist").add(issue)
+        end
+      end
+      require("jira.worklist").add({ key = key })
+    end
+  end, "add issue to the worklist")
   map("close", function()
     vim.api.nvim_buf_delete(bufnr, { force = true })
   end, "close list")
@@ -100,6 +120,7 @@ function M.open_with(name, title, fetch)
       once = true,
       callback = function()
         fetchers[bufnr] = nil
+        shown[bufnr] = nil
       end,
     })
   end
@@ -109,6 +130,13 @@ function M.open_with(name, title, fetch)
   vim.wo.cursorline = true
   load(bufnr)
   return bufnr
+end
+
+--- Open a list of `key`'s child tickets (board order).
+function M.open_children(key)
+  return M.open_with("children/" .. key, key .. " — child tickets", function(cb)
+    require("jira.api.hierarchy").children(key, cb)
+  end)
 end
 
 --- Open a list buffer for the given JQL.

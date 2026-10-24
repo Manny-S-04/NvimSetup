@@ -11,6 +11,8 @@ instead of a popup that covers the code you're typing next to.
 
 No completion framework underneath: it talks to Neovim's built-in LSP client directly.
 
+Full reference inside Neovim: `:help mini_complete`.
+
 ## Features
 
 - Candidates from **every** attached LSP server, plus [LuaSnip](https://github.com/L3MON4D3/LuaSnip)
@@ -153,3 +155,21 @@ friends ignore them.
 3. On accept: resolve the item if the server supports it (to get auto-import edits), delete the typed
    word, apply `additionalTextEdits` while an extmark tracks the cursor position, insert the
    `textEdit`/`insertText` (expanding snippets), then run the item's `command`.
+
+## Development
+
+Tests drive the real plugin in a headless Neovim against an in-process fake language server: keys are
+typed as a user would, so debouncing, autocmds, mappings and LSP round trips all run for real. No
+dependencies. From the plugin root:
+
+```sh
+nvim --headless -u NONE -c "luafile tests/run.lua"
+```
+
+They cover option merging, highlights (incl. after `:colorscheme`), opening/filtering/sorting, `min_prefix`,
+excluded filetypes, the trigger-character allowlist, selection keys, `<Esc>` and key fall-through, and
+accepting: labels, `itemDefaults` + `textEditText`, LSP snippets and auto-import edits that arrive on resolve.
+
+## License
+
+MIT, see [LICENSE](LICENSE).

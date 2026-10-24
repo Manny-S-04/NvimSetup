@@ -11,9 +11,12 @@ PROJ-1   To Do        Audit endpoint times out
 PROJ-2   In Progress  Add retry to payment client
 ```
 
+Full reference inside Neovim: `:help jira`.
+
 ## Features
 
 - `:JiraMine` / `:JiraSearch <JQL>` — issue lists (any JQL), status coloured by category
+- `:JiraFind` — build a query from menus (project, assignee, status, type, sprint, text, updated) without writing JQL; save it as a preset and rerun with `:JiraFind <name>`
 - `:JiraBoard [ID]` — exactly what a board page shows: the active sprint on a scrum board, open work
   on a kanban board, in board order
 - `:JiraIssue [KEY]` — open a ticket; with no argument it uses the key under the cursor
@@ -39,7 +42,7 @@ PROJ-2   In Progress  Add retry to payment client
 ```lua
 {
   "<your-github-user>/jira.nvim",
-  cmd = { "Jira", "JiraMine", "JiraIssue", "JiraSearch", "JiraBoard", "JiraRefresh" },
+  cmd = { "Jira", "JiraMine", "JiraIssue", "JiraSearch", "JiraFind", "JiraBoard", "JiraRefresh" },
   opts = {},
 }
 ```
@@ -113,7 +116,8 @@ require("jira").setup({
 | Command | |
 |---|---|
 | `:JiraMine` | Your open issues (`jql_mine`) |
-| `:JiraSearch <JQL>` | Any search, e.g. `:JiraSearch project = PROJ AND sprint in openSprints()` |
+| `:JiraSearch <JQL>` | Any search, e.g. `:JiraSearch project = PROJ AND sprint in openSprints()`. A bare key (`PROJ-12`) or plain words (`login timeout`) work too; no argument opens `:JiraFind` |
+| `:JiraFind [preset]` | Menu-driven query builder (shows the JQL as you go); `★ Save as preset`, then `:JiraFind <name>` |
 | `:JiraBoard [ID]` | A board's current view. `ID` is the number in `…/boards/19` (a pasted board URL works too); with no `ID`, uses `board` from the config, or lets you pick from your boards |
 | `:JiraIssue [KEY]` | Open an issue (defaults to the key under the cursor) |
 | `:JiraRefresh` | Refresh the current issue buffer |
@@ -168,3 +172,31 @@ Run the tests from the plugin root (plenary is cloned to `$PLENARY_DIR`, default
 nvim --headless --noplugin -u tests/minimal_init.lua \
   -c "PlenaryBustedDirectory tests { minimal_init = 'tests/minimal_init.lua', sequential = true }"
 ```
+
+## License
+
+MIT, see [LICENSE](LICENSE).
+
+## Parents, children and the worklist
+
+Sometimes you're given one ticket whose parent (an epic, or a story with sub-tasks) holds the
+tickets you're actually meant to do. `:JiraWork CV-5` finds CV-5's parent, lists its children in
+board order, and makes them your **worklist**: a [Harpoon](https://github.com/ThePrimeagen/harpoon/tree/harpoon2)
+list named `jira` (per working directory, so it survives restarts).
+
+| | |
+|---|---|
+| `:JiraWork [KEY]` | Worklist = KEY's parent's children (no parent: KEY's own children) |
+| `:JiraParent [KEY]` / `:JiraChildren [KEY]` | Open the parent / list the children |
+| `:JiraWorklist` | Open the worklist in Harpoon's menu: reorder or delete lines, Enter opens a ticket |
+| `:JiraWorklist next` / `prev` / `add` / `refresh` | Step through it, add the current ticket, re-fetch statuses (`✓` = done) |
+| issue buffer `gp` / `gc` / `W` / `+` | Parent / children / worklist from this ticket / add to worklist |
+| list buffer `W` / `+` | This list becomes the worklist / add the ticket under the cursor |
+
+`KEY` defaults to the issue buffer you're in, or the key under the cursor. Stepping through the
+worklist reuses the ticket window instead of opening a new split each time.
+
+Jira Cloud links epics and sub-tasks through one `parent` field. On Server/DC, epics use the
+"Epic Link" field: set `epic_link_field = "customfield_XXXXX"` (find it at `/rest/api/2/field`) to
+follow those too. Harpoon is optional; without it the worklist commands say so and the rest works.
+
