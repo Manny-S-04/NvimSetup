@@ -1,0 +1,296 @@
+*jira.txt*  Jira tickets in Neovim: lists, boards, status, comments, assigning
+
+Author:  Manny Singh
+License: MIT
+
+==============================================================================
+CONTENTS                                                       *jira-contents*
+
+  1. Introduction ............................................ |jira-intro|
+  2. Requirements ..................................... |jira-requirements|
+  3. Credentials ....................................... |jira-credentials|
+  4. Setup ................................................... |jira-setup|
+  5. Options ............................................... |jira-options|
+  6. Commands ............................................. |jira-commands|
+  7. List buffers ............................................. |jira-list|
+  8. Issue buffers ........................................... |jira-issue|
+  9. Boards ................................................. |jira-boards|
+ 10. Lua API .................................................... |jira-api|
+ 11. Health and troubleshooting ...................... |jira-troubleshooting|
+
+==============================================================================
+1. INTRODUCTION                                                   *jira-intro*
+
+jira.nvim lets you work with Jira without leaving Neovim: list issues with
+any JQL, see what a board shows, open a ticket, move it through your
+workflow, comment, and assign it.
+
+It talks to Jira Cloud (REST v3) and Jira Server / Data Center (REST v2)
+from one codebase. The API version, the comment format (ADF on Cloud, plain
+text on Server) and how users are identified (accountId or username) are
+chosen for you. Every request runs in the background, so Neovim never
+blocks on the network.
+
+==============================================================================
+2. REQUIREMENTS                                            *jira-requirements*
+
+- Neovim 0.10 or newer.
+- `curl` on your PATH. Windows 10 and later ship `curl.exe`.
+- A Jira API token (Cloud) or a Personal Access Token (Server/DC).
+
+==============================================================================
+3. CREDENTIALS                                              *jira-credentials*
+
+Keep credentials out of your config (and out of git): set them as
+environment variables, which jira.nvim reads when |jira-setup| runs.
+
+  $JIRA_URL        Your site, e.g. https://yourcompany.atlassian.net
+  $JIRA_EMAIL      Your Atlassian email. Cloud only.
+  $JIRA_API_TOKEN  Cloud: an API token from id.atlassian.com, Security,
+                   API tokens. Server/DC: a Personal Access Token.
+
+Cloud uses Basic auth (email + token). Without an email jira.nvim sends the
+token as a Bearer Personal Access Token, which is what Server/DC expects.
+
+The token is passed to curl on stdin, so it never appears in the process
+list.
+
+On Windows, `setx JIRA_URL "https://..."` saves a variable for programs
+started afterwards. A terminal (or Neovim) that was already open keeps its
+old copy: open a new one. Check from Neovim with `:echo $JIRA_URL`.
+
+==============================================================================
+4. SETUP                                                          *jira-setup*
+                                                              *jira.setup()*
+With lazy.nvim, loading on the commands: >lua
+    {
+      '<your-github-user>/jira.nvim',
+      cmd = { 'Jira', 'JiraMine', 'JiraIssue', 'JiraSearch', 'JiraFind', 'JiraBoard',
+              'JiraRefresh' },
+      opts = { board = 19 },
+    }
+<
+Other plugin managers: call `require('jira').setup(opts)`. Calling it again
+updates the options; the commands are only created once.
+
+==============================================================================
+5. OPTIONS                                                      *jira-options*
+
+All options are optional. Explicit options win over environment variables.
+
+                                                                 *jira-url*
+url ~
+    Default: `$JIRA_URL`. Base URL of your Jira site.
+
+                                                               *jira-email*
+email ~
+    Default: `$JIRA_EMAIL`. Needed for Cloud. Leave unset for a Server/DC
+    Personal Access Token.
+
+                                                           *jira-api_token*
+api_token ~
+    Default: `$JIRA_API_TOKEN`.
+
+                                                          *jira-deployment*
+deployment ~
+    Default: `nil` (detect). `"cloud"` or `"server"`. When unset, a URL
+    ending in `.atlassian.net` is Cloud and anything else is Server/DC.
+
+                                                             *jira-timeout*
+timeout ~
+    Default: `10000`. Milliseconds per request.
+
+                                                            *jira-jql_mine*
+jql_mine ~
+    Default: >
+    assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC
+<    The search behind |:JiraMine|.
+
+                                                         *jira-max_results*
+max_results ~
+    Default: `50`. Issues per |:JiraSearch| and |:JiraMine| list.
+
+                                                               *jira-board*
+board ~
+    Default: `nil`. The board |:JiraBoard| opens with no argument: the
+    number at the end of the board's URL (`.../boards/19`). When unset,
+    |:JiraBoard| asks you to pick one.
+
+                                                        *jira-sprint_field*
+sprint_field ~
+    Default: `"customfield_10020"` (the Sprint field on Jira Cloud). On
+    Server/DC the id differs per site: open `<url>/rest/api/2/field` and
+    look for the field whose `schema.custom` ends in `:gh-sprint`.
+
+                                                            *jira-open_cmd*
+open_cmd ~
+    Default: `"split"`. How list and issue buffers open: `"split"`,
+    `"vsplit"`, `"tabnew"` or `"edit"`.
+
+                                                             *jira-keymaps*
+keymaps ~
+    Buffer-local keys. Set any to `false` to disable it. Defaults: >lua
+    keymaps = {
+      issue = { close = 'q', refresh = 'r', status = 's', comment = 'c',
+                assign_me = 'a', unassign = 'A', browser = 'gx',
+                help = 'g?' },
+      list  = { open = '<CR>', browser = 'gx', refresh = 'r', close = 'q' },
+    }
+<    See |jira-list| and |jira-issue|.
+
+==============================================================================
+6. COMMANDS                                                    *jira-commands*
+
+                                                                    *:Jira*
+:Jira
+    Show the command summary and which Jira instance you are connected to.
+
+                                                                *:JiraMine*
+:JiraMine
+    List your open issues (|jira-jql_mine|) in a |jira-list| buffer.
+
+                                                              *:JiraSearch*
+:JiraSearch {jql}
+    List the issues matching any JQL query. Examples: >vim
+    :JiraSearch project = CV AND sprint in openSprints() ORDER BY rank
+    :JiraSearch assignee is EMPTY AND status = "To Do"
+<
+    A bare issue key ("CV-12") becomes `key = CV-12`; plain words with no
+    operator become a text search. With no {jql}, opens |:JiraFind|.
+
+                                                                *:JiraFind*
+:JiraFind [{preset}]
+    Build a query from menus instead of writing JQL: project, assignee,
+    status (by category, so it works with any workflow), issue type, sprint,
+    text, updated-within and reporter. The prompt shows the JQL built so far.
+    "Edit JQL by hand" lets you tweak it before running. "Save as preset"
+    stores it in `stdpath("data")/jira.nvim/presets.json`; run it later with
+    `:JiraFind {preset}` (completes preset names). Presets can also be set
+    in |jira-config| via `jql_presets = { name = "jql" }`.
+
+                                                               *:JiraBoard*
+:JiraBoard [{id}]
+    List what a board shows (see |jira-boards|). {id} is the number in the
+    board's URL; a pasted board URL works too. Without {id} it uses
+    |jira-board|, or lets you pick from the boards you can see.
+
+                                                               *:JiraIssue*
+:JiraIssue [{key}]
+    Open an issue, e.g. `:JiraIssue CV-123`. Without {key} it uses the issue
+    key under the cursor, so it works from commit messages, branch names
+    and TODO comments.
+
+                                                             *:JiraRefresh*
+:JiraRefresh
+    Reload the issue in the current issue buffer.
+
+==============================================================================
+7. LIST BUFFERS                                                    *jira-list*
+
+|:JiraMine|, |:JiraSearch| and |:JiraBoard| show one issue per line: key,
+status (coloured by status category) and summary. Default keys:
+
+  <CR>   Open the issue under the cursor.
+  gx     Open it in the browser.
+  r      Run the query again.
+  q      Close the list.
+
+==============================================================================
+8. ISSUE BUFFERS                                                  *jira-issue*
+
+An issue buffer shows the summary, status, assignee, reporter, priority,
+type, sprint, description and comments. Default keys:
+
+  s      Change status. Only the transitions your workflow allows from the
+         current status are offered.
+  c      Add a comment (see below).
+  a      Assign the issue to yourself.
+  A      Unassign it.
+  gx     Open it in the browser.
+  r      Refresh.
+  q      Close.
+  g?     Show these keys.
+
+                                                         *jira-comment*
+Comments open in a scratch buffer. Blank lines separate paragraphs. `:w`
+posts the comment, `:q!` throws it away. If posting fails, your text stays
+in the buffer so nothing is lost.
+
+==============================================================================
+9. BOARDS                                                        *jira-boards*
+
+|:JiraBoard| asks Jira Software's board API (`/rest/agile/1.0`, on both Cloud
+and Server/DC) for the board's own contents. The board's saved filter and its
+rank order are applied by Jira, so you see the board's scope without knowing
+its JQL.
+
+- Scrum board: the issues in its active sprint(s), not planned future ones.
+  The title shows the sprint name and its end date.
+- Kanban board: unfinished issues plus those resolved in the last 14 days,
+  close to what Jira's own board shows.
+
+`r` repeats the whole lookup, so after a sprint rolls over it shows the new
+one. Lists stop at 500 issues. Quick filters, swimlanes and columns are not
+reproduced: it is one list in rank order, with each issue's status.
+
+==============================================================================
+10. LUA API                                                         *jira-api*
+
+The API modules know nothing about buffers, so they work in your own
+scripts. Every function takes an optional trailing callback. With it the
+call is asynchronous and `cb(value, err)` runs on the main loop; without it
+the call blocks and returns `value, err`. `err` is a table with a `message`.
+
+Issues: `require('jira.api.issues')`                        *jira-api-issues*
+
+  get({key}, [cb])                 One issue: `key`, `summary`, `status`,
+                                   `assignee`, `reporter`, `priority`,
+                                   `issue_type`, `sprint`, `description`,
+                                   `comments`, and the `raw` response.
+  search({jql}, [cb])              A list of issues (lighter than get()).
+  transitions({key}, [cb])         `{ id, name, to }` for each transition
+                                   allowed from the current status.
+  transition({key}, {id}, [cb])    Move the issue through a transition.
+  add_comment({key}, {text}, [cb]) Plain text; converted to ADF on Cloud.
+  assign_to_me({key}, [cb])
+  unassign({key}, [cb])
+  myself([cb])                     The authenticated user (cached).
+  browse_url({key})                Web URL of the issue.
+  validate_key({key})              `true` or `false, message`.
+
+Boards: `require('jira.api.boards')` (callback required)    *jira-api-boards*
+
+  board_view({id}, cb)             What |:JiraBoard| shows:
+                                   `cb(issues, err, title)`.
+  get({id}, cb)                    `{ id, name, type, project }`.
+  list({project}, cb)              Boards you can see (first 50).
+  active_sprints({id}, cb)         `{ id, name, goal, end_date }` list.
+  issues({id}, {jql}, cb)          The board's issues matching {jql}, in
+                                   rank order, all pages up to 500.
+
+Example: move every issue in your list that has a transition called
+"In Progress" there: >lua
+    local issues = require('jira.api.issues')
+    for _, i in ipairs(issues.search('assignee = currentUser()')) do
+      for _, t in ipairs(issues.transitions(i.key)) do
+        if t.name == 'In Progress' then issues.transition(i.key, t.id) end
+      end
+    end
+<
+==============================================================================
+11. HEALTH AND TROUBLESHOOTING                          *jira-troubleshooting*
+
+Run `:checkhealth jira`. It checks Neovim, curl, the URL, which deployment
+was detected, the credentials, and makes one request to confirm they work.
+
+  HTTP 401           Wrong email or token, a scoped Cloud token, or your
+                     organisation has disabled API tokens.
+  HTTP 403           Your Jira role can't do that on this project (the same
+                     would happen in the browser).
+  No Sprint line     Set |jira-sprint_field| (Server/DC).
+  curl exit 6/7/35/60  DNS, connection or TLS: VPN or a corporate proxy.
+                     curl honours `HTTPS_PROXY`.
+  Empty $JIRA_URL    Neovim was started from a terminal opened before the
+                     variable was set. See |jira-credentials|.
+
+ vim:tw=78:ts=8:noet:ft=help:norl:
