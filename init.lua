@@ -163,6 +163,10 @@ vim.api.nvim_create_user_command("LSB", function()
     vim.api.nvim_buf_set_lines(0, 0, -1, false, vim.split(vim.fn.execute("ls"), "\n"))
 end, {})
 
+vim.api.nvim_create_user_command("TB", function()
+    vim.cmd("Telescope buffers")
+end, {})
+
 local function open_scratch_buffer(lines, title)
     local name = title or "[Scratch]"
     local existing = vim.fn.bufnr(name)
