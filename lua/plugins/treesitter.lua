@@ -17,7 +17,11 @@ return {
                         "xml",
                 },
                 auto_install = true,
-                highlight = { enable = true },
+                highlight = {
+                    enable = true,
+                    -- Off for >512 KB files and decompiled metadata (where F12 into a library lands).
+                    disable = function(lang, buf) return require("crash-guard").ts_disable(lang, buf) end,
+                },
                 indent = { enable = true },
             })
             end

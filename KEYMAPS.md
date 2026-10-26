@@ -3,6 +3,19 @@
 Visual Studio keys where a terminal can send them, `<leader>` (Space) fallbacks for the rest.
 Forgot one? **Space ?** searches every mapping by description (e.g. type `definition` → `<F12>`).
 
+## Stuck? Find out yourself
+
+| Key / command | Does |
+|---|---|
+| `F1` | Guide for what you're doing *right now* — paused at a breakpoint, debugging, in C#, tests, git, Jira. `Enter` on a line runs that key, `p` pins it in the corner (follows you as you step), `a` browses all |
+| `Space H` | Browse / fuzzy-search every how-to ("breakpoint", "port in use", "rename"…) |
+| `Space ?` | Search every key mapping by what it does |
+| statusline | While debugging, the keys you need right now are shown bottom-right |
+| `:Guide edit` / `:Guide check` | Add your own how-to / check the guides still match your mappings |
+| `:Doctor` | Language servers, leftover processes, what nvim was doing before the last crash |
+| `:DotnetCleanup` | Kill Roslyn / netcoredbg / your API left running by a crashed session (runs automatically at startup) |
+| `nv` (PowerShell) | Run nvim via this instead of `nvim`: after a crash it fixes the terminal and cleans up. Setup: add `. "$env:LOCALAPPDATA\nvim\scripts\nv.ps1"` to `$PROFILE` |
+
 ## One-time setup per machine
 
 ```powershell
@@ -28,6 +41,7 @@ Roslyn (`roslyn-language-server`) is installed automatically by easy-dotnet the 
 | `Space dr` | Immediate window | REPL: evaluate, or assign (`x = 5`) |
 | `Space du` | Debug windows | Locals · Watch · Call Stack · Breakpoints (left), Output + Immediate (bottom) |
 | `Space dk` / `dj` | Call stack up/down | |
+| `Space dp` | Break All | Pause the running program |
 | `Space da` | Attach to process | |
 
 Variable values also appear inline next to the code while stopped.

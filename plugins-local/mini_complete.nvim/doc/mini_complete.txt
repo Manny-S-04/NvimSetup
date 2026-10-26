@@ -1,0 +1,267 @@
+*mini_complete.txt*  LSP completion in a one-line bar at the bottom
+
+Author:  Manny Singh
+License: MIT
+
+==============================================================================
+CONTENTS                                              *mini_complete-contents*
+
+  1. Introduction ................................... |mini_complete-intro|
+  2. Requirements ............................ |mini_complete-requirements|
+  3. Setup .......................................... |mini_complete-setup|
+  4. Options ...................................... |mini_complete-options|
+  5. Keys ............................................ |mini_complete-keys|
+  6. Accepting an item ............................ |mini_complete-accept|
+  7. Snippets .................................... |mini_complete-snippets|
+  8. Highlights ................................ |mini_complete-highlights|
+  9. Lua API ........................................... |mini_complete-api|
+ 10. How it works .................................. |mini_complete-design|
+ 11. Troubleshooting ...................... |mini_complete-troubleshooting|
+
+==============================================================================
+1. INTRODUCTION                                          *mini_complete-intro*
+
+mini_complete shows LSP completion in a single line at the bottom of the
+screen, minibuffer style, instead of a popup next to the cursor that covers
+the code you are typing beside:
+>
+      var task = Tas|
+    ---------------------------------------------------------------------
+    Task  Task<>  TaskAsyncEnumerableExtensions  TaskCanceledException ...
+<
+There is no completion framework underneath: it talks to Neovim's built-in
+LSP client directly and merges the results of every attached server.
+
+==============================================================================
+2. REQUIREMENTS                                   *mini_complete-requirements*
+
+- Neovim 0.11 or newer.
+- At least one language server with completion, started by
+  |vim.lsp.enable()| or a plugin.
+- Optional: LuaSnip, for your own snippets in the list
+  (|mini_complete-snippets|).
+
+==============================================================================
+3. SETUP                                                 *mini_complete-setup*
+                                                       *mini_complete.setup()*
+With lazy.nvim: >lua
+    {
+      '<your-github-user>/mini_complete.nvim',
+      event = 'InsertEnter',
+      opts = {},
+    }
+<
+Other plugin managers: `require('mini_complete').setup(opts)`. Calling it
+again replaces the options and the key mappings.
+
+If you also use nvim-cmp or blink.cmp, disable them for the same buffers;
+two completion UIs fighting over the same keys is never pleasant.
+
+==============================================================================
+4. OPTIONS                                             *mini_complete-options*
+
+                                                   *mini_complete-debounce_ms*
+debounce_ms ~
+    Default: `30`. Milliseconds after the last keystroke before the servers
+    are asked. Older requests are cancelled as you type.
+
+                                                    *mini_complete-min_prefix*
+min_prefix ~
+    Default: `1`. Characters of the current word needed before the bar
+    opens. Words follow 'iskeyword', so non-ASCII identifiers work.
+
+                                            *mini_complete-trigger_characters*
+trigger_characters ~
+    Default: `{ '.', '->', '::' }`. Tokens that open the bar with no word
+    typed yet (e.g. right after `obj.`), when a server also advertises the
+    token's last character as a trigger. Servers advertise many more (space,
+    `(`, `,`, `=`) which would open the bar on almost every key, so this is
+    an allowlist. `false` disables it. Lua users may add `':'`; in C# and
+    TypeScript it would fire on `case x:` and on ternaries.
+
+                                            *mini_complete-resolve_timeout_ms*
+resolve_timeout_ms ~
+    Default: `300`. How long accepting waits for `completionItem/resolve`,
+    which is where many servers send auto-import edits.
+
+                                                       *mini_complete-enabled*
+enabled ~
+    Default: normal and `acwrite` buffers only. A function `(bufnr)` that
+    returns `false` to turn completion off in that buffer.
+
+                                             *mini_complete-exclude_filetypes*
+exclude_filetypes ~
+    Default: `{}`. Filetypes where completion never runs.
+
+                                                       *mini_complete-luasnip*
+luasnip ~
+    Default: `true`. Use LuaSnip when it is installed. See
+    |mini_complete-snippets|.
+
+                                              *mini_complete-notify_on_attach*
+notify_on_attach ~
+    Default: `false`. `vim.notify` once when a completion-capable server
+    attaches, handy for slow servers that index first (Roslyn).
+
+                                                          *mini_complete-docs*
+docs ~
+    Default: `{ max_height = 12, border = 'rounded' }`. The documentation
+    window. `border` takes any value of 'winborder' / |nvim_open_win()|.
+
+                                                       *mini_complete-keymaps*
+keymaps ~
+    Insert-mode keys, see |mini_complete-keys|. Set any to `false` to leave
+    that key alone.
+
+                                                *mini_complete-opt-highlights*
+highlights ~
+    Default: `{}`. Overrides for the highlight groups in
+    |mini_complete-highlights|, e.g. >lua
+    highlights = { MiniCompleteSelected = { bg = '#45475a', bold = true } }
+<
+==============================================================================
+5. KEYS                                                   *mini_complete-keys*
+
+Insert mode. Every key falls through to its normal behaviour while the bar
+(or the docs window) is closed, so `<CR>` is still Enter and `<Esc>` still
+leaves insert mode.
+
+  Key      Option              Does ~
+  <C-j>    `next`              Select the next item (wraps around).
+  <C-k>    `prev`              Select the previous item (wraps around).
+  <CR>     `accept`            Insert the selected item.
+  <Esc>    `cancel`            Close the bar, then do <Esc>'s normal job.
+  <F6>     `toggle_docs`       Show or hide documentation for the item.
+  <F7>     `focus_docs`        Move into the docs window, to search or copy.
+                               `q` or <Esc> there brings you back.
+  <C-f>    `scroll_docs_down`  Scroll the docs window down.
+  <C-b>    `scroll_docs_up`    Scroll the docs window up.
+  (none)   `snippet_next`      Jump to the next LuaSnip placeholder.
+  (none)   `snippet_prev`      Jump to the previous LuaSnip placeholder.
+
+Example: >lua
+    opts = { keymaps = { next = '<Tab>', prev = '<S-Tab>',
+                         snippet_next = '<C-l>', snippet_prev = '<C-h>' } }
+<
+==============================================================================
+6. ACCEPTING AN ITEM                                    *mini_complete-accept*
+
+Accepting follows the LSP specification, which is what makes it insert the
+right text in C#, TypeScript and Rust:
+
+- A `textEdit` wins over `insertText`, which wins over the label. The label
+  is only what is shown: Roslyn shows `Task<>` but inserts `Task`.
+- `itemDefaults` (LSP 3.17), sent once for the whole list, are merged into
+  each item, including `editRange` and `textEditText`.
+- The edit runs to the cursor as it is now, so characters typed after the
+  request are replaced too.
+- `additionalTextEdits` (e.g. a new `using` / `import` line) are applied. If
+  the item has none, the item is resolved first, because many servers only
+  send them on resolve. The completion still lands where you were, even when
+  lines are added above it.
+- An item's `command` is run after inserting (Roslyn uses this for some
+  overrides and imports).
+- The bar does not reopen on the word you just completed.
+
+==============================================================================
+7. SNIPPETS                                           *mini_complete-snippets*
+
+With LuaSnip installed and |mini_complete-luasnip| on:
+
+- Your snippets for the current filetype are listed alongside LSP items
+  whose label starts with the typed word. They are left out after `.`, `:`
+  and `->`, where only members make sense.
+- LSP snippets (`insertTextFormat = 2`) expand through LuaSnip, so your
+  LuaSnip jump keys work in them.
+
+Without LuaSnip, LSP snippets expand with |vim.snippet|.
+
+==============================================================================
+8. HIGHLIGHTS                                       *mini_complete-highlights*
+
+Each group links to a group your colorscheme already defines, so the bar
+matches your popup menu. They are set again after every |:colorscheme|.
+
+  Group                          Used for             Links to ~
+  *MiniCompleteNormal*           The bar              |hl-Pmenu|
+  *MiniCompleteSelected*         The selected item    |hl-PmenuSel|
+  *MiniCompleteSnippet*          A LuaSnip item       Special
+  *MiniCompleteSnippetSelected*  A selected snippet   |hl-PmenuSel|
+  *MiniCompleteDocNormal*        The docs window      |hl-NormalFloat|
+  *MiniCompleteDocBorder*        Its border           |hl-FloatBorder|
+
+Override them with |mini_complete-opt-highlights|.
+
+==============================================================================
+9. LUA API                                                 *mini_complete-api*
+>lua
+    local mc = require('mini_complete')
+<
+                                                  *mini_complete.is_visible()*
+mc.is_visible()
+    `true` while the bar is open.
+
+                                                      *mini_complete.accept()*
+mc.accept()
+    Insert the selected item (see |mini_complete-accept|).
+
+                                                      *mini_complete.cancel()*
+mc.cancel()
+    Close the bar and cancel pending requests.
+
+                                                 *mini_complete.select_next()*
+                                                 *mini_complete.select_prev()*
+mc.select_next()
+mc.select_prev()
+    Move the selection, wrapping around.
+
+                                                 *mini_complete.toggle_docs()*
+                                                  *mini_complete.focus_docs()*
+mc.toggle_docs()
+mc.focus_docs()
+    Show or hide the docs window; move the cursor into it.
+
+mc.config
+    The options in effect, after |mini_complete.setup()|.
+
+Use them for your own mappings, e.g. accept with <Tab> only while the bar is
+open. Not an |:map-expr| mapping: accepting changes the buffer, which an
+expression mapping may not do. >lua
+    vim.keymap.set('i', '<Tab>', function()
+      if mc.is_visible() then
+        mc.accept()
+      else
+        vim.api.nvim_feedkeys(vim.keycode('<Tab>'), 'in', false)
+      end
+    end)
+<
+==============================================================================
+10. HOW IT WORKS                                        *mini_complete-design*
+
+- On each change in insert mode it reads the word before the cursor and,
+  after |mini_complete-debounce_ms|, asks every attached server with
+  `textDocument/completion`. A newer request cancels the older one.
+- Items whose filter text starts with the typed word (ignoring case) are
+  kept and sorted by the server's `sortText`.
+- The bar and the docs window live in hidden scratch buffers named
+  `mini-complete://bar` and `mini-complete://docs` (see `:ls!`). They are
+  `nofile` and unmodifiable, so `:wall` and session files ignore them.
+- The bar closes when you leave insert mode or move the cursor off the word.
+
+==============================================================================
+11. TROUBLESHOOTING                            *mini_complete-troubleshooting*
+
+Run `:checkhealth mini_complete`. It checks the Neovim version, whether
+LuaSnip is used, and lists every running completion server.
+
+  Nothing opens         No server attached to the buffer: check
+                        `:checkhealth vim.lsp`. Some (Roslyn) need several
+                        seconds to load a solution; see
+                        |mini_complete-notify_on_attach|.
+  Opens too eagerly     Raise |mini_complete-min_prefix| or remove tokens
+                        from |mini_complete-trigger_characters|.
+  Wrong text inserted   Please report it with the server name: the LSP
+                        item's `textEdit` / `insertText` is what decides.
+  Colours look off      Set |mini_complete-highlights|.
+
+ vim:tw=78:ts=8:noet:ft=help:norl:

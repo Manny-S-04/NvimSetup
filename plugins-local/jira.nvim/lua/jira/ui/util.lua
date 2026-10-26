@@ -66,10 +66,16 @@ function M.named_scratch(name, filetype)
 end
 
 --- Show a buffer: focus its window if visible, otherwise open it in a split.
-function M.show(bufnr)
+--- opts.reuse_window: if the current window already shows a jira buffer, show it there instead
+--- of splitting again (worklist next/prev would otherwise stack up splits).
+function M.show(bufnr, opts)
+  opts = opts or {}
   local winid = vim.fn.bufwinid(bufnr)
   if winid == -1 then
     local open_cmd = require("jira.config").options.open_cmd or "split"
+    if opts.reuse_window and vim.bo.filetype:match("^jira%-") then
+      open_cmd = "edit"
+    end
     if open_cmd ~= "edit" then
       vim.cmd(open_cmd)
     end

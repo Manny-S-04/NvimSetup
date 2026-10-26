@@ -1,7 +1,7 @@
 -- Visual Studio muscle memory for .NET work.
 -- Function keys work in every terminal. Combos like Ctrl+. and Ctrl+Shift+B only reach Neovim if
 -- your terminal sends them (Windows Terminal usually does), so each has a <leader> fallback.
--- Forgot a key? <leader>? searches every mapping by description.
+-- Forgot a key? F1 shows a guide for what you're doing; <leader>? searches every mapping by description.
 local map = vim.keymap.set
 
 local function dap() return require("dap") end
@@ -56,6 +56,8 @@ end, { desc = "Debug: tracepoint (log, don't stop)" })
 map("n", "<leader>da", dotnet("debug attach"), { desc = "Debug: attach to process" })
 map("n", "<leader>dr", function() dap().repl.toggle() end, { desc = "Debug: Immediate window (REPL)" })
 map("n", "<leader>du", function() require("dapui").toggle() end, { desc = "Debug: toggle windows" })
+map("n", "<leader>z", function() require("zoom").toggle() end, { desc = "Zoom: current window full-screen / back" })
+map("n", "<leader>dp", function() dap().pause() end, { desc = "Debug: pause (Break All)" })
 map("n", "<leader>dk", function() dap().up() end, { desc = "Debug: up the call stack" })
 map("n", "<leader>dj", function() dap().down() end, { desc = "Debug: down the call stack" })
 
@@ -87,7 +89,7 @@ map("n", "<leader>nmu", dotnet("ef database update"), { desc = "EF: update datab
 map("n", "<leader>nml", dotnet("ef migrations list"), { desc = "EF: list migrations" })
 
 -- ── Code navigation / editing ─────────────────────────────────────────────────────────
--- F12 (definition) and F2 (rename) are already mapped in telescope.lua / vim-options.lua.
+-- F12 (definition) is mapped in crash-guard.lua, F2 (rename) in vim-options.lua.
 map("n", "<S-F12>", function() require("telescope.builtin").lsp_references() end, { desc = "Find all references (Shift+F12)" })
 map("n", "<C-F12>", function() require("telescope.builtin").lsp_implementations() end, { desc = "Go to implementation (Ctrl+F12)" })
 map("n", "<A-F12>", function()

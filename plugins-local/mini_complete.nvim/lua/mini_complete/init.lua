@@ -166,6 +166,10 @@ end
 -- A hidden scratch buffer, named so it is recognisable in :ls! and can never be "written":
 -- nofile + unmodifiable + no undo history.
 local function scratch_buf(name)
+  -- After a module reload (e.g. :Lazy reload) the old buffer still owns the name: reuse it.
+  for _, b in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.api.nvim_buf_get_name(b) == name then return b end
+  end
   local buf = vim.api.nvim_create_buf(false, true)
   vim.bo[buf].buftype = 'nofile'
   vim.bo[buf].bufhidden = 'hide'

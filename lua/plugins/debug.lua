@@ -44,10 +44,47 @@ return {
             vim.fn.sign_define("DapBreakpointRejected", { text = "○", texthl = "DiagnosticWarn" })
             vim.fn.sign_define("DapStopped", { text = "➜", texthl = "DiagnosticWarn", linehl = "Visual" })
 
-            dap.listeners.before.attach.dapui_config = function() dapui.open() end
-            dap.listeners.before.launch.dapui_config = function() dapui.open() end
-            dap.listeners.before.event_terminated.dapui_config = function() dapui.close() end
-            dap.listeners.before.event_exited.dapui_config = function() dapui.close() end
+            -- Panels follow what you're doing, not whether a session exists:
+            --   paused (breakpoint / step)  -> panels open
+            --   running (F5 continue)       -> panels close, you get your code back
+            -- Stepping (F10/F11) sends "continued" then "stopped" a few ms apart, so the close
+            -- is delayed and cancelled if we stop again: no flicker while stepping.
+            -- Space du still shows/hides them by hand (e.g. to read program output while running).
+            local HIDE_DELAY_MS = 400
+            local hide_timer = nil ---@type uv.uv_timer_t|nil
+
+            local function cancel_hide()
+                if hide_timer then
+                    hide_timer:stop()
+                    hide_timer:close()
+                    hide_timer = nil
+                end
+            end
+
+            local function show()
+                cancel_hide()
+                require("zoom").unzoom() -- a breakpoint hit wins over zoom: you want to see locals
+                dapui.open()
+            end
+
+            local function hide_soon()
+                cancel_hide()
+                hide_timer = vim.defer_fn(function()
+                    hide_timer = nil
+                    local s = dap.session()
+                    if not (s and s.stopped_thread_id) then dapui.close() end
+                end, HIDE_DELAY_MS)
+            end
+
+            local function hide_now()
+                cancel_hide()
+                dapui.close()
+            end
+
+            dap.listeners.after.event_stopped.dapui_config = show
+            dap.listeners.after.event_continued.dapui_config = hide_soon
+            dap.listeners.before.event_terminated.dapui_config = hide_now
+            dap.listeners.before.event_exited.dapui_config = hide_now
         end,
     },
 }

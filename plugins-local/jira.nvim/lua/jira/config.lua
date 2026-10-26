@@ -13,11 +13,17 @@ local defaults = {
   -- JQL behind :JiraMine
   jql_mine = "assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC",
   max_results = 50,
+  -- Named queries for :JiraFind <name>, e.g. { bugs = 'issuetype = "Bug" AND statusCategory != "Done"' }.
+  -- Presets saved from the :JiraFind menu are stored separately and merged on top.
+  jql_presets = {},
   -- Board :JiraBoard opens with no argument (the number in .../boards/19). nil = pick from a list.
   board = nil,
   -- Field holding the sprint. customfield_10020 on Jira Cloud; on Server/DC it differs per
   -- instance (find it at /rest/api/2/field, the one with "schema.custom" ending in ":gh-sprint").
   sprint_field = "customfield_10020",
+  -- Server/DC only: the "Epic Link" field (e.g. "customfield_10014"), so parent/children follow epics
+  -- too. Cloud doesn't need it: epics are ordinary parents there.
+  epic_link_field = nil,
   -- How issue/list buffers are opened: "split", "vsplit", "tabnew" or "edit".
   open_cmd = "split",
   -- Buffer-local keymaps. Set any entry to false to disable it.
@@ -30,6 +36,10 @@ local defaults = {
       assign_me = "a",
       unassign = "A",
       browser = "gx",
+      parent = "gp",
+      children = "gc",
+      work = "W",
+      worklist_add = "+",
       help = "g?",
     },
     list = {
@@ -37,6 +47,8 @@ local defaults = {
       browser = "gx",
       refresh = "r",
       close = "q",
+      worklist = "W",
+      worklist_add = "+",
     },
   },
 }

@@ -314,6 +314,9 @@ require("lazy").setup("plugins")
 require("vs-keymaps")
 require("keymap-search")
 require("csharp-lsp").setup()
+require("crash-guard").setup()   -- F12, crash breadcrumbs, :Doctor
+require("dotnet-procs").setup()  -- kill Roslyn/netcoredbg/API left behind by a crash, :DotnetCleanup
+require("guide").setup()         -- F1: what can I do here?  <leader>H: all how-tos
 
 local resize_mode_active = false
 
