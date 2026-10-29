@@ -121,16 +121,23 @@ function M.meta(team, project, cb)
     if not results then
       return finish(nil, err)
     end
-    local status_rows = rows_across(results[1], { "status", "itemStatus", "projItemStatus", "itemstatus", "projStatus" })
-    local order = {}
-    for _, r in ipairs(status_rows) do
-      table.insert(order, r.id)
+    local function ids(rows)
+      return vim.tbl_map(function(r)
+        return r.id
+      end, rows)
     end
+    local status_rows = rows_across(results[1], { "status", "itemStatus", "projItemStatus", "itemstatus", "projStatus" })
+    local type_rows = rows_across(results[2], { "projItemType", "itemType" })
+    local priority_rows = rows_across(results[3], { "projPriority", "priority" })
+    -- *_order keep the server's order (workflow order, High..Low), which an alphabetical
+    -- sort would scramble ("High | Low | Medium")
     local meta = {
       statuses = by_id_with_name(status_rows, { "statusName", "name" }),
-      status_order = order,
-      types = by_id_with_name(rows_across(results[2], { "projItemType", "itemType" }), { "itemTypeName", "name" }),
-      priorities = by_id_with_name(rows_across(results[3], { "projPriority", "priority" }), { "priorityName", "name" }),
+      status_order = ids(status_rows),
+      types = by_id_with_name(type_rows, { "itemTypeName", "name" }),
+      type_order = ids(type_rows),
+      priorities = by_id_with_name(priority_rows, { "priorityName", "name" }),
+      priority_order = ids(priority_rows),
       users = by_id_with_name(rows_across(results[4], { "user", "projUser" }), { "userName", "displayName", "name" }),
     }
     meta_cache[key] = meta

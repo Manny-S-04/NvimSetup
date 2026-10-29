@@ -6,26 +6,45 @@ local M = {}
 
 local META_FIELDS = {
   { key = "status", label = "Status" },
-  { key = "assignee", label = "Owners" },
-  { key = "reporter", label = "Created by" },
+  { key = "assignee", label = "Owners", empty = "(none)" },
   { key = "priority", label = "Priority" },
   { key = "issue_type", label = "Type" },
-  { key = "epic", label = "Epic" },
+  { key = "points", label = "Points" },
   { key = "sprint_name", label = "Sprint" },
-  { key = "updated", label = "Updated", date = true },
+  { key = "epic", label = "Epic" },
+  { key = "reporter", label = "Created by" },
+  { key = "updated", label = "Updated", date = true, time = true },
 }
 
+local function epoch_seconds(v)
+  local n = tonumber(v)
+  if not n then
+    return nil
+  end
+  if n >= 1e11 then
+    return math.floor(n / 1000) -- milliseconds
+  elseif n >= 1e8 then
+    return math.floor(n)
+  end
+  return nil
+end
+
 --- Zoho sends dates as epoch milliseconds, epoch seconds, or formatted strings.
-function M.format_date(v)
+---@param with_time boolean|nil include HH:MM
+function M.format_date(v, with_time)
   if v == nil or v == "" then
     return ""
   end
+  local secs = epoch_seconds(v)
+  if secs then
+    return os.date(with_time and "%Y-%m-%d %H:%M" or "%Y-%m-%d", secs)
+  end
   local s = tostring(v)
-  local n = tonumber(s)
-  if n and #s >= 12 then
-    return os.date("%Y-%m-%d", math.floor(n / 1000))
-  elseif n and #s >= 9 then
-    return os.date("%Y-%m-%d", math.floor(n))
+  if with_time then
+    local d, t = s:match("^(%d%d%d%d%-%d%d%-%d%d)[T ](%d%d:%d%d)")
+    if d then
+      return d .. " " .. t
+    end
   end
   return s:match("^(%d%d%d%d%-%d%d%-%d%d)") or s
 end
@@ -49,11 +68,18 @@ function M.render(item)
   for _, meta in ipairs(META_FIELDS) do
     local value = item[meta.key]
     if meta.date then
-      value = M.format_date(value)
+      value = M.format_date(value, meta.time)
+    end
+    if (value == nil or value == "") and meta.empty then
+      value = meta.empty
     end
     if value ~= nil and value ~= "" then
       local label = meta.label .. ":"
-      hl(add(("%-14s%s"):format(label, tostring(value))), 0, #label, "sprintsLabel")
+      local idx = add(("%-14s%s"):format(label, tostring(value)))
+      hl(idx, 0, #label, "sprintsLabel")
+      if meta.key == "status" then
+        hl(idx, 14, 14 + #tostring(value), M.status_hl(item.status_category))
+      end
     end
   end
 
@@ -63,7 +89,7 @@ function M.render(item)
   add("")
   local desc = html.to_lines(item.description)
   if #desc == 0 then
-    add("(no description)")
+    add("(no description — e to edit)")
   else
     for _, l in ipairs(desc) do
       add(l)
@@ -71,21 +97,22 @@ function M.render(item)
   end
 
   add("")
-  local ch = "## Comments"
+  local n = item.comments and #item.comments or 0
+  local ch = n > 0 and ("## Comments (%d)"):format(n) or "## Comments"
   hl(add(ch), 0, #ch, "sprintsHeading")
   add("")
   if item.comments_error then
     add("(comments unavailable: " .. item.comments_error .. ")")
-  elseif not item.comments or #item.comments == 0 then
-    add("(no comments)")
+  elseif n == 0 then
+    add("(no comments — c to add one)")
   else
     for i, c in ipairs(item.comments) do
       local author = c.author or "Unknown"
-      hl(add(author .. " — " .. M.format_date(c.created)), 0, #author, "sprintsCommentAuthor")
+      hl(add(author .. " — " .. M.format_date(c.created, true)), 0, #author, "sprintsCommentAuthor")
       for _, l in ipairs(html.to_lines(c.body)) do
         add(l)
       end
-      if i < #item.comments then
+      if i < n then
         add("")
       end
     end
@@ -111,8 +138,55 @@ function M.status_hl(category)
   return "sprintsStatusTodo"
 end
 
+--- "Manny Singh, Sam Clarke" -> "MS SC": owner names are long, initials keep rows on one line.
+function M.initials(names)
+  if not names or names == "" then
+    return "-"
+  end
+  local out = {}
+  for name in (names .. ","):gmatch("%s*(.-)%s*,") do
+    local letters = {}
+    for word in name:gmatch("%S+") do
+      table.insert(letters, vim.fn.strcharpart(word, 0, 1):upper())
+      if #letters == 2 then
+        break
+      end
+    end
+    -- a raw id (owner not in the project user list) shouldn't become "1"
+    table.insert(out, name:match("^%d+$") and "?" or table.concat(letters))
+  end
+  return table.concat(out, " ")
+end
+
+--- Group items by status in the project's status order (unknown statuses last).
+local function grouped(items, status_order)
+  local by_status, order, seen = {}, {}, {}
+  for _, id in ipairs(status_order or {}) do
+    table.insert(order, id)
+    seen[id] = true
+  end
+  for _, it in ipairs(items) do
+    local k = it.status_id or it.status or "?"
+    if not seen[k] then
+      table.insert(order, k)
+      seen[k] = true
+    end
+    by_status[k] = by_status[k] or {}
+    table.insert(by_status[k], it)
+  end
+  local groups = {}
+  for _, k in ipairs(order) do
+    if by_status[k] then
+      table.insert(groups, { title = by_status[k][1].status or k, items = by_status[k] })
+    end
+  end
+  return groups
+end
+
+--- @param opts { group: boolean|nil, status_order: string[]|nil }|nil
 --- @return string[] lines, table[] highlights, table<integer, table> items by 1-based line
-function M.render_list(title, items)
+function M.render_list(title, items, opts)
+  opts = opts or {}
   local lines, highlights, by_line = { "# " .. title, "" }, {}, {}
   table.insert(highlights, { line = 0, col_start = 0, col_end = #lines[1], hl_group = "sprintsHeading" })
   if #items == 0 then
@@ -120,19 +194,61 @@ function M.render_list(title, items)
     return lines, highlights, by_line
   end
 
-  local key_w, status_w = 0, 0
+  -- column widths across all items, so grouped sections still line up with each other
+  local w = { key = 0, status = 0, type = 0, pts = 0, own = 0 }
+  local cells = {}
   for _, it in ipairs(items) do
-    key_w = math.max(key_w, width(it.key or ""))
-    status_w = math.max(status_w, width(it.status or ""))
+    local c = {
+      key = it.key or "?",
+      status = it.status or "",
+      type = it.issue_type or "",
+      pts = it.points and tostring(it.points) or "",
+      own = M.initials(it.assignee),
+    }
+    cells[it] = c
+    for k, v in pairs(c) do
+      w[k] = math.max(w[k], width(v))
+    end
   end
-  for _, it in ipairs(items) do
-    local key, status = it.key or "?", it.status or ""
-    table.insert(lines, pad(key, key_w) .. "  " .. pad(status, status_w) .. "  " .. (it.summary or ""))
+
+  local function row(it)
+    local c = cells[it]
+    local parts = { pad(c.key, w.key) }
+    if not opts.group then
+      table.insert(parts, pad(c.status, w.status))
+    end
+    table.insert(parts, pad(c.type, w.type))
+    if w.pts > 0 then
+      table.insert(parts, pad(c.pts, w.pts))
+    end
+    table.insert(parts, pad(c.own, w.own))
+    table.insert(parts, it.summary or "")
+    table.insert(lines, table.concat(parts, "  "))
     local idx = #lines - 1
     by_line[#lines] = it
-    table.insert(highlights, { line = idx, col_start = 0, col_end = #key, hl_group = "sprintsKey" })
-    local s = #pad(key, key_w) + 2
-    table.insert(highlights, { line = idx, col_start = s, col_end = s + #status, hl_group = M.status_hl(it.status_category) })
+    table.insert(highlights, { line = idx, col_start = 0, col_end = #c.key, hl_group = "sprintsKey" })
+    if not opts.group then
+      local s = #pad(c.key, w.key) + 2
+      table.insert(highlights, { line = idx, col_start = s, col_end = s + #c.status, hl_group = M.status_hl(it.status_category) })
+    end
+  end
+
+  if opts.group then
+    for gi, g in ipairs(grouped(items, opts.status_order)) do
+      if gi > 1 then
+        table.insert(lines, "")
+      end
+      local h = ("## %s (%d)"):format(g.title, #g.items)
+      table.insert(lines, h)
+      table.insert(highlights, { line = #lines - 1, col_start = 0, col_end = #h, hl_group = M.status_hl(g.items[1].status_category) })
+      for _, it in ipairs(g.items) do
+        row(it)
+      end
+    end
+  else
+    for _, it in ipairs(items) do
+      row(it)
+    end
   end
   return lines, highlights, by_line
 end

@@ -58,20 +58,48 @@ that doesn't expire, and the plugin mints short-lived access tokens from it.
 
 ## Commands
 
-| Command | |
-|---|---|
-| `:SprintsMine` | Your items in the active sprint(s) |
-| `:SprintsSprint [pick]` | Active sprint(s); `pick` chooses any sprint |
-| `:SprintsBacklog` | The project backlog |
-| `:SprintsItem [NO]` | Open an item by number (default: word under cursor) |
-| `:SprintsProject` | Switch project for the session |
-| `:SprintsRefresh` | Refresh the item buffer |
-| `:SprintsRaw <what>` | Raw API response: `teams projects project sprints statuses users` |
-| `:Sprints` | Help |
+| Command | Key | |
+|---|---|---|
+| `:SprintsMine` | `<leader>sm` | Your items in the active sprint(s) |
+| `:SprintsBoard` | `<leader>sb` | Active sprint grouped by status |
+| `:SprintsBacklog` | `<leader>sl` | The backlog |
+| `:SprintsNew` | `<leader>sn` | New item (`:w` creates) |
+| `:SprintsItem [NO]` | `<leader>si` | Open an item: `I12`, `12`, `#12`, `PRJ-I12`, default word under cursor |
+| `:SprintsSearch WORDS` | `<leader>ss` | Items whose title has every word (active sprint + backlog) |
+| `:SprintsSprint [pick]` | | Active sprint(s); `pick` chooses any (active first) |
+| `:SprintsProject` | | Switch project for the session |
+| `:SprintsRaw <what>` | | Raw API response: `teams projects project sprints statuses users` |
+| `:Sprints` | | Help |
 
-**List:** `<CR>` open · `m` toggle only mine · `gx` browser · `r` refresh · `q` close
-**Item:** `s` status · `c` comment (`:w` posts) · `a` assign to me · `A` unassign · `gx` browser ·
+**List** — `<CR>` open · `n` new item here · `b` board view · `m` only mine · `yk`/`yu` copy key/link ·
+`gx` browser · `r` refresh · `g?` help
+
+**Item** — `s` status · `e` edit everything (`:w` saves) · `c` comment (`:w` posts) · `a` add/remove me ·
+`o` add/remove an owner · `A` remove all owners (asks) · `p` priority · `yk`/`yu` copy key/link · `gx` browser ·
 `gR` raw response · `r` refresh · `g?` help
+
+### Editing and creating
+
+`e` on an item and `:SprintsNew` / `n` open the same kind of buffer:
+
+```
+# Title
+
+Status: In Progress        <- allowed values show as virtual text
+Type: Bug
+Priority: High
+Points: 3
+Owners: Manny Singh, Sam   <- full names, first names, "me"; empty = none
+---
+Description in **markdown**.
+```
+
+`:w` saves; only fields you changed are sent. Values match case-insensitively and by unique
+word prefix (`prog` → In Progress). A bad value is explained and your text is kept. New items
+also get a `Sprint:` line (active/upcoming sprints or `Backlog`).
+
+Comments and descriptions are written in markdown and stored as the HTML Zoho's web UI shows:
+bold, italics, code, links, lists, headings and code blocks survive the round trip.
 
 ## Differences from jira.nvim, and why
 
@@ -84,6 +112,8 @@ that doesn't expire, and the plugin mints short-lived access tokens from it.
 - **Assign to me replaces the owner list.** Zoho items can have several owners.
 - **Not ported yet:** the harpoon worklist and parent/children navigation (Zoho has epics and
   sub-items rather than Jira's parent field).
+- **Still needs the browser:** moving an item between sprints, editing or deleting comments,
+  logging time, attachments. Each needs an endpoint that isn't confirmed yet.
 
 ## Status of the API mapping
 
@@ -91,15 +121,20 @@ Zoho's API reference is a JavaScript app, so parts of this were built from worki
 third-party clients rather than the reference itself. The guesses are isolated so each is a
 one-line fix:
 
-- `items.ENDPOINTS`: the comments (`/notes/`) path and field, and the update-item field names
-  (`statusid`, `users`). **Unverified.**
+- `items.ENDPOINTS`: the comments (`/notes/`) path and field (**unverified**); update-item field
+  names, assumed to match create's (confirmed) plus `statusid` (**unverified**).
 - `items.FIELDS`: candidate field names per attribute; the first one present wins.
 - `sprints.SPRINT_TYPES`: which `sprintType` code means "active". **Unverified.**
 
 `gR` in an item and `:SprintsRaw` show the real payloads to check these against. If comments
 fail, the item still opens with the reason shown under *Comments*.
 
-## Tests
+## Testing
+
+`api_url` / `accounts_url` (env `ZOHO_SPRINTS_API_URL` / `ZOHO_ACCOUNTS_URL`) point the plugin at
+another host, e.g. a local mock server for manual testing.
+
+
 
 ```sh
 nvim --headless -u tests/minimal_init.lua -c "PlenaryBustedDirectory tests/ { minimal_init = 'tests/minimal_init.lua', sequential = true }"

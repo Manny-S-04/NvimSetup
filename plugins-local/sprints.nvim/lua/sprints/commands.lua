@@ -48,7 +48,8 @@ local function items_of(team, project, sprint_ids, mine_only, cb)
 end
 
 --- Fetcher for the list buffer: the active sprint(s) of the project.
-local function active_fetcher(team, project)
+--- `on_sprints(active)` learns which sprints were shown (for `n` = new item there).
+local function active_fetcher(team, project, on_sprints)
   return function(mine_only, cb)
     api("sprints").active(team, project, function(active, err)
       if not active then
@@ -62,6 +63,7 @@ local function active_fetcher(team, project)
         table.insert(ids, s.id)
         table.insert(names, s.name)
       end
+      on_sprints(active)
       items_of(team, project, ids, mine_only, function(list, ierr)
         cb(list, ierr, table.concat(names, " + "))
       end)
@@ -69,23 +71,38 @@ local function active_fetcher(team, project)
   end
 end
 
-local function open_active(mine_only)
+---@param opts { mine_only: boolean|nil, group: boolean|nil }
+local function open_active(opts)
   require("sprints.ui.context").project(function(team, project)
-    require("sprints.ui.list").open_with("active/" .. project, "Active sprint", active_fetcher(team, project),
-      { mine_only = mine_only })
+    local first_active = nil
+    require("sprints.ui.list").open_with("active/" .. project, "Active sprint",
+      active_fetcher(team, project, function(active)
+        first_active = active[1]
+      end), {
+        mine_only = opts.mine_only,
+        group = opts.group,
+        project = { team = team, project = project },
+        new_target = function()
+          return first_active
+            and { team = team, project = project, sprint = first_active.id, sprint_name = first_active.name }
+        end,
+      })
   end)
 end
 
 local function open_sprint(team, project, sprint)
   require("sprints.ui.list").open_with("sprint/" .. sprint.id, sprint.name, function(mine_only, cb)
     items_of(team, project, { sprint.id }, mine_only, cb)
-  end)
+  end, {
+    project = { team = team, project = project },
+    new_target = { team = team, project = project, sprint = sprint.id, sprint_name = sprint.name },
+  })
 end
 
 local function cmd_sprint(cmd_opts)
   local arg = vim.trim(cmd_opts.args or "")
   if arg == "" then
-    return open_active(false)
+    return open_active({})
   end
   if arg ~= "pick" then
     return vim.notify("sprints.nvim: usage :SprintsSprint [pick]", vim.log.levels.WARN)
@@ -123,6 +140,100 @@ local function cmd_backlog()
   end)
 end
 
+--- Every item in the active sprint(s) and the backlog: what :SprintsItem and :SprintsSearch
+--- look through (Zoho has no get-by-number or text search call).
+local function scan(team, project, cb)
+  local async = api("async")
+  async.all({
+    function(done)
+      api("sprints").active(team, project, done)
+    end,
+    function(done)
+      api("sprints").backlog_id(team, project, function(id)
+        done(id or false, nil) -- a missing backlog shouldn't block the sprint search
+      end)
+    end,
+  }, function(res, err)
+    if not res then
+      return cb(nil, err)
+    end
+    local ids = {}
+    for _, s in ipairs(res[1]) do
+      table.insert(ids, s.id)
+    end
+    if res[2] then
+      table.insert(ids, res[2])
+    end
+    items_of(team, project, ids, false, cb)
+  end)
+end
+
+--- Does every word of `query` appear in the item's title or key? (case-insensitive)
+function M.item_contains(it, query)
+  local hay = ((it.summary or "") .. " " .. (it.key or "")):lower()
+  for word in query:lower():gmatch("%S+") do
+    if not hay:find(word, 1, true) then
+      return false
+    end
+  end
+  return true
+end
+
+local function cmd_search(cmd_opts)
+  local query = vim.trim(cmd_opts.args or "")
+  if query == "" then
+    return vim.notify("sprints.nvim: usage :SprintsSearch <words>", vim.log.levels.WARN)
+  end
+  require("sprints.ui.context").project(function(team, project)
+    require("sprints.ui.list").open_with("search/" .. project, ("Search: %s"):format(query), function(mine_only, cb)
+      scan(team, project, function(list, err)
+        if not list then
+          return cb(nil, err)
+        end
+        local hits = vim.tbl_filter(function(it)
+          return M.item_contains(it, query)
+        end, list)
+        if mine_only then
+          api("workspace").me(team, project, function(me, merr)
+            if not me then
+              return cb(nil, merr)
+            end
+            cb(vim.tbl_filter(function(it)
+              return vim.tbl_contains(it.owner_ids, me)
+            end, hits), nil)
+          end)
+        else
+          cb(hits, nil)
+        end
+      end)
+    end, { project = { team = team, project = project } })
+  end)
+end
+
+local function cmd_new()
+  require("sprints.ui.context").project(function(team, project)
+    api("sprints").active(team, project, function(active)
+      local function go(target)
+        require("sprints.ui.edit").new(target, function(new_ref)
+          require("sprints.ui.list").refresh_all()
+          if new_ref.item then
+            require("sprints.ui.item").open_ref(new_ref, "the new item")
+          end
+        end)
+      end
+      if active and active[1] then
+        return go({ team = team, project = project, sprint = active[1].id, sprint_name = active[1].name })
+      end
+      api("sprints").backlog_id(team, project, function(id, err)
+        if not id then
+          return notify_error("no active sprint or backlog to create in", err)
+        end
+        go({ team = team, project = project, sprint = id, sprint_name = "Backlog" })
+      end)
+    end)
+  end)
+end
+
 --- Item reference in a word like "PRJ-I12,", "(I12)", "#12" or "12"; nil if there's none.
 function M.ref_in_word(word)
   return word:match("[%w%-]*%d+")
@@ -139,8 +250,12 @@ function M.item_matches(it, wanted)
   if w:match("^%d+$") then
     return key:match("(%d+)$") == w or no:match("(%d+)$") == w
   end
-  local suffix = "%-" .. vim.pesc(w) .. "$"
-  return key:match(suffix) ~= nil or no:match(suffix) ~= nil
+  -- a project prefix on either side: "I12" finds "PRJ-I12", and "PRJ-I12" (copied from a
+  -- commit message) finds an item whose key is just "I12"
+  local function ends_with(s, tail)
+    return tail ~= "" and s:match("%-" .. vim.pesc(tail) .. "$") ~= nil
+  end
+  return ends_with(key, w) or ends_with(no, w) or ends_with(w, key) or ends_with(w, no)
 end
 
 --- :SprintsItem I123 — search the active sprint(s) and the backlog for that item number.
@@ -154,38 +269,18 @@ local function cmd_item(cmd_opts)
     return vim.notify("sprints.nvim: usage :SprintsItem <item number> (or cursor on one)", vim.log.levels.WARN)
   end
   require("sprints.ui.context").project(function(team, project)
-    local async = api("async")
-    async.all({
-      function(done)
-        api("sprints").active(team, project, done)
-      end,
-      function(done)
-        api("sprints").backlog_id(team, project, function(id)
-          done(id or false, nil) -- a missing backlog shouldn't block the sprint search
-        end)
-      end,
-    }, function(res, err)
-      if not res then
+    vim.notify("sprints.nvim: looking for " .. wanted .. "…")
+    scan(team, project, function(list, err)
+      if not list then
         return notify_error("could not search", err)
       end
-      local ids = {}
-      for _, s in ipairs(res[1]) do
-        table.insert(ids, s.id)
-      end
-      if res[2] then
-        table.insert(ids, res[2])
-      end
-      items_of(team, project, ids, false, function(list, ierr)
-        if not list then
-          return notify_error("could not search", ierr)
+      for _, it in ipairs(list) do
+        if M.item_matches(it, wanted) then
+          return require("sprints.ui.item").open_ref(it.ref, it.key)
         end
-        for _, it in ipairs(list) do
-          if M.item_matches(it, wanted) then
-            return require("sprints.ui.item").open_ref(it.ref, it.key)
-          end
-        end
-        vim.notify(("sprints.nvim: %s not found in the active sprint(s) or backlog"):format(wanted), vim.log.levels.WARN)
-      end)
+      end
+      vim.notify(("sprints.nvim: %s not found in the active sprint(s) or backlog (try :SprintsSearch)"):format(wanted),
+        vim.log.levels.WARN)
     end)
   end)
 end
@@ -235,6 +330,9 @@ local function cmd_help()
     "sprints.nvim (Zoho Sprints)",
     "",
     "  :SprintsMine            Your items in the active sprint(s)",
+    "  :SprintsBoard           Active sprint(s) grouped by status",
+    "  :SprintsNew             New item (in the active sprint; :w creates)",
+    "  :SprintsSearch WORDS    Items whose title has all the words (active sprint + backlog)",
     "  :SprintsSprint [pick]   Active sprint(s); pick = choose any sprint",
     "  :SprintsBacklog         The project backlog",
     "  :SprintsItem [NO]       Open an item by number (defaults to the word under the cursor)",
@@ -242,7 +340,7 @@ local function cmd_help()
     "  :SprintsRefresh         Refresh the current item buffer",
     "  :SprintsRaw <what>      Raw API response (teams|projects|project|sprints|statuses|users)",
     "",
-    "In a list: <CR> open, m toggle mine, r refresh. In an item: g? for keys.",
+    "In a list or an item, g? shows its keys.",
     "",
     ("Data centre: zoho.%s   team: %s   project: %s"):format(config.domain(), o.team_id or "(pick)", o.project_id or "(pick)"),
   }, "\n"))
@@ -258,7 +356,10 @@ end
 
 local COMMANDS = {
   { "Sprints", cmd_help, { nargs = 0, desc = "sprints.nvim help" }, false },
-  { "SprintsMine", function() open_active(true) end, { nargs = 0, desc = "Your items in the active sprint" } },
+  { "SprintsMine", function() open_active({ mine_only = true }) end, { nargs = 0, desc = "Your items in the active sprint" } },
+  { "SprintsBoard", function() open_active({ group = true }) end, { nargs = 0, desc = "Active sprint grouped by status" } },
+  { "SprintsNew", cmd_new, { nargs = 0, desc = "Create a Zoho Sprints item (:w creates)" } },
+  { "SprintsSearch", cmd_search, { nargs = "+", desc = "Find items by title words in the active sprint and backlog" } },
   { "SprintsSprint", cmd_sprint, {
     nargs = "?",
     complete = function()

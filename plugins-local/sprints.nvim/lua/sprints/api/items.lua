@@ -3,9 +3,10 @@
 --   ref = { team = "...", project = "...", sprint = "...", item = "..." }
 -- (sprint is the backlog id for backlog items).
 --
--- CONFIRMED paths (seen in working third-party clients): list items, item details, create.
+-- CONFIRMED paths (seen in working third-party clients): list items, item details, create,
+-- and create's form fields (name, description, projitemtypeid, projpriorityid, users, point).
 -- UNVERIFIED (best guesses, isolated here so they're one-line fixes): the comment ("notes")
--- endpoints and the update-item form field names. Field names are matched against several
+-- endpoints, and that update takes the same field names as create (plus statusid). Field names are matched against several
 -- candidates for the same reason; :SprintsRaw / gR show the real payload.
 local async = require("sprints.api.async")
 local client = require("sprints.api.client")
@@ -29,6 +30,7 @@ local F = {
   epic = { "epicId", "epicid" },
   parent = { "parentItemId", "parentId" },
   sprint = { "sprintId", "sprintid" },
+  points = { "point", "points", "storyPoints", "estimationPoint" },
 }
 M.FIELDS = F
 
@@ -39,8 +41,17 @@ M.ENDPOINTS = {
   notes_path = "/notes/", -- comments
   notes_list_action = "data",
   note_text_field = "name",
-  update_status_field = "statusid",
-  update_users_field = "users",
+  -- item field -> form field, for update and create
+  form_fields = {
+    name = "name",
+    description = "description",
+    status_id = "statusid",
+    type_id = "projitemtypeid",
+    priority_id = "projpriorityid",
+    owner_ids = "users",
+    points = "point",
+  },
+  created_id_keys = { "addedItemId", "itemId", "id" },
 }
 
 local function item_path(ref)
@@ -119,11 +130,15 @@ function M.normalise(row, ref, meta, side)
     owner_ids = decode.id_list(decode.pick(row, F.owners)),
     reporter = user(decode.pick(row, F.created_by)),
     priority = lookup(meta.priorities, decode.pick(row, F.priority)) or lookup(side.projPriority, decode.pick(row, F.priority)),
+    priority_id = decode.pick(row, F.priority) and tostring(decode.pick(row, F.priority)) or nil,
     issue_type = lookup(meta.types, decode.pick(row, F.type)) or lookup(side.projItemType, decode.pick(row, F.type)),
+    type_id = decode.pick(row, F.type) and tostring(decode.pick(row, F.type)) or nil,
+    points = decode.pick(row, F.points),
     epic = epic and (lookup(side.epic, epic) or tostring(epic)) or nil,
     created = decode.pick(row, F.created),
     updated = decode.pick(row, F.updated),
     description = decode.pick(row, F.description),
+    sprint_name = require("sprints.api.sprints").name_of(ref.team, ref.project, decode.pick(row, F.sprint) or ref.sprint),
     comments = {},
     ref = {
       team = ref.team,
@@ -216,7 +231,21 @@ end
 --- Item with its comments. Comments failing (e.g. while that endpoint is unverified) doesn't
 --- fail the item: it's shown with a note instead.
 function M.get(ref, cb)
-  workspace.meta(ref.team, ref.project, function(meta, merr)
+  local sprints = require("sprints.api.sprints")
+  async.all({
+    function(done)
+      workspace.meta(ref.team, ref.project, done)
+    end,
+    function(done) -- sprint names for the Sprint: line; failure here mustn't fail the item
+      if sprints.name_of(ref.team, ref.project, ref.sprint) then
+        return done(true, nil)
+      end
+      sprints.list(ref.team, ref.project, function()
+        done(true, nil)
+      end)
+    end,
+  }, function(res, merr)
+    local meta = res and res[1]
     if not meta then
       return cb(nil, merr)
     end
@@ -240,9 +269,51 @@ function M.get(ref, cb)
   end)
 end
 
-local function update(ref, form, cb)
+--- Item fields (keys of ENDPOINTS.form_fields) -> form fields. Unknown keys are an error,
+--- not silently dropped, so a typo can't look like a successful save.
+function M.to_form(fields)
+  local form = {}
+  for k, v in pairs(fields) do
+    local name = M.ENDPOINTS.form_fields[k]
+    if not name then
+      error("sprints.nvim: unknown item field " .. k)
+    end
+    form[name] = type(v) == "number" and tostring(v) or v
+  end
+  return form
+end
+
+--- Update some fields of an item. `fields` uses item field names (see form_fields).
+function M.update(ref, fields, cb)
+  local ok, form = pcall(M.to_form, fields)
+  if not ok then
+    return async.fail(cb, form)
+  end
+  if next(form) == nil then
+    return async.ok(cb, true) -- nothing changed: no request
+  end
   client.request("POST", item_path(ref), { form = form }, function(result, err)
     cb(result and true or nil, err)
+  end)
+end
+
+--- Create an item in a sprint (or the backlog: its id as ref.sprint). cb(new_ref).
+function M.create(ref, fields, cb)
+  if not (fields.name and fields.name:match("%S")) then
+    return async.fail(cb, "an item needs a title")
+  end
+  local ok, form = pcall(M.to_form, fields)
+  if not ok then
+    return async.fail(cb, form)
+  end
+  local where = { team = ref.team, project = ref.project, sprint = ref.sprint }
+  client.request("POST", item_path(where), { form = form }, function(result, err)
+    if not result then
+      return cb(nil, err)
+    end
+    local id = decode.pick(result.body or {}, M.ENDPOINTS.created_id_keys)
+    where.item = id and tostring(id) or nil
+    cb(where, nil)
   end)
 end
 
@@ -262,36 +333,34 @@ function M.statuses(ref, cb)
 end
 
 function M.set_status(ref, status_id, cb)
-  update(ref, { [M.ENDPOINTS.update_status_field] = tostring(status_id) }, cb)
+  M.update(ref, { status_id = tostring(status_id) }, cb)
 end
 
 function M.set_owners(ref, user_ids, cb)
-  update(ref, { [M.ENDPOINTS.update_users_field] = user_ids }, cb)
+  M.update(ref, { owner_ids = user_ids }, cb)
 end
 
-function M.assign_to_me(ref, cb)
+--- Add or remove you as an owner, keeping everyone else (items can have several owners).
+---@param current string[] current owner ids
+---@param add boolean
+function M.toggle_me(ref, current, add, cb)
   workspace.me(ref.team, ref.project, function(me, err)
     if not me then
       return cb(nil, err)
     end
-    M.set_owners(ref, { me }, cb)
+    local owners = vim.tbl_filter(function(id)
+      return id ~= me
+    end, current or {})
+    if add then
+      table.insert(owners, me)
+    end
+    M.set_owners(ref, owners, cb)
   end)
 end
 
-function M.unassign(ref, cb)
-  M.set_owners(ref, {}, cb)
-end
-
---- Plain text -> the HTML Zoho's rich-text fields store.
+--- Markdown -> the HTML Zoho's rich-text fields store.
 function M.text_to_html(text)
-  local escaped = text:gsub("\r\n", "\n"):gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;")
-  local paras = {}
-  for para in (escaped .. "\n\n"):gmatch("(.-)\n\n+") do
-    if para:match("%S") then
-      table.insert(paras, "<div>" .. para:gsub("\n", "<br>") .. "</div>")
-    end
-  end
-  return table.concat(paras)
+  return require("sprints.markdown").to_html(text)
 end
 
 function M.add_comment(ref, text, cb)

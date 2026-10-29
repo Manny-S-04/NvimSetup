@@ -48,17 +48,53 @@ function M.normalise(row)
   }
 end
 
+local names = {} -- "team/project" -> { sprint id -> name }, filled by list() and backlog_id()
+local backlog_cache = {}
+
+--- Sprint name if known (any list() or backlog_id() call this session teaches it), else nil.
+function M.name_of(team, project, sprint_id)
+  if sprint_id == nil then
+    return nil
+  end
+  local key = team .. "/" .. project
+  if backlog_cache[key] == tostring(sprint_id) then
+    return "Backlog"
+  end
+  return (names[key] or {})[tostring(sprint_id)]
+end
+
+-- Picker order: what you're working in first, then what's next, then history.
+local STATE_RANK = { active = 1, upcoming = 2, completed = 3, cancelled = 4 }
+
+function M.sort(list)
+  table.sort(list, function(a, b)
+    local ra, rb = STATE_RANK[a.state] or 5, STATE_RANK[b.state] or 5
+    if ra ~= rb then
+      return ra < rb
+    end
+    local na, nb = tonumber(a.no), tonumber(b.no)
+    if na and nb and na ~= nb then
+      return na > nb -- newest first within a state
+    end
+    return (a.name or "") > (b.name or "")
+  end)
+  return list
+end
+
 function M.list(team, project, cb)
   async.pages(("/team/%s/projects/%s/sprints/"):format(team, project), { action = "data" }, "sprint",
     function(bodies, err)
       if not bodies then
         return cb(nil, err)
       end
-      local out = {}
+      local out, key = {}, team .. "/" .. project
+      names[key] = names[key] or {}
       for _, r in ipairs((async.merge(bodies, "sprint"))) do
-        table.insert(out, M.normalise(r))
+        local s = M.normalise(r)
+        names[key][s.id] = s.name
+        table.insert(out, s)
       end
-      cb(out, nil)
+      cb(M.sort(out), nil)
     end)
 end
 
@@ -109,8 +145,6 @@ function M.backlog_from_details(body, project)
   end
   return find_key(body, "backlogid", 0)
 end
-
-local backlog_cache = {}
 
 function M.backlog_id(team, project, cb)
   local key = team .. "/" .. project

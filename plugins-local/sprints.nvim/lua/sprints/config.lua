@@ -33,6 +33,10 @@ local defaults = {
   user_id = nil,
   -- Used only to find user_id when it isn't set. Env: ZOHO_EMAIL.
   email = nil,
+  -- Override the hosts derived from dc (proxies, a local mock server). Env: ZOHO_SPRINTS_API_URL,
+  -- ZOHO_ACCOUNTS_URL. api_url includes the /zsapi prefix.
+  api_url = nil,
+  accounts_url = nil,
   -- request timeout in milliseconds
   timeout = 10000,
   -- page size for list endpoints (Zoho caps `range` at 100 on most of them)
@@ -47,19 +51,29 @@ local defaults = {
       close = "q",
       refresh = "r",
       status = "s",
+      edit = "e",
       comment = "c",
       assign_me = "a",
+      owners = "o",
       unassign = "A",
+      priority = "p",
+      yank_key = "yk",
+      yank_url = "yu",
       browser = "gx",
       raw = "gR",
       help = "g?",
     },
     list = {
       open = "<CR>",
+      new = "n",
+      board = "b",
+      mine = "m",
+      yank_key = "yk",
+      yank_url = "yu",
       browser = "gx",
       refresh = "r",
-      mine = "m",
       close = "q",
+      help = "g?",
     },
   },
 }
@@ -76,6 +90,8 @@ local function env()
     project_id = os.getenv("ZOHO_SPRINTS_PROJECT"),
     user_id = os.getenv("ZOHO_SPRINTS_USER"),
     email = os.getenv("ZOHO_EMAIL"),
+    api_url = os.getenv("ZOHO_SPRINTS_API_URL"),
+    accounts_url = os.getenv("ZOHO_ACCOUNTS_URL"),
   }
 end
 
@@ -110,11 +126,11 @@ function M.domain()
 end
 
 function M.api_base()
-  return ("https://sprintsapi.zoho.%s/zsapi"):format(M.domain())
+  return M.options.api_url or ("https://sprintsapi.zoho.%s/zsapi"):format(M.domain())
 end
 
 function M.accounts_base()
-  return ("https://accounts.zoho.%s"):format(M.domain())
+  return M.options.accounts_url or ("https://accounts.zoho.%s"):format(M.domain())
 end
 
 local function missing()

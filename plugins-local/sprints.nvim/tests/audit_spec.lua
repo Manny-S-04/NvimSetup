@@ -65,6 +65,26 @@ describe("sprints", function()
   end)
 end)
 
+describe("sprints.sort", function()
+  it("puts the active sprint first, then upcoming, then newest completed", function()
+    local list = require("sprints.api.sprints").sort({
+      { name = "S10", state = "completed", no = 10 }, { name = "S13", state = "upcoming", no = 13 },
+      { name = "S12", state = "active", no = 12 }, { name = "S11", state = "completed", no = 11 },
+    })
+    assert.are.same({ "S12", "S13", "S11", "S10" }, vim.tbl_map(function(s) return s.name end, list))
+  end)
+end)
+
+describe("search", function()
+  it("matches every word in title or key", function()
+    local c = require("sprints.commands")
+    local it_ = { key = "I2", summary = "Audit list endpoint timing out" }
+    assert.is_true(c.item_contains(it_, "audit TIMING"))
+    assert.is_true(c.item_contains(it_, "i2"))
+    assert.is_false(c.item_contains(it_, "audit pharmacy"))
+  end)
+end)
+
 describe("auth.lifetime_seconds", function()
   local auth = require("sprints.api.auth")
   it("handles seconds, legacy milliseconds and expires_in_sec", function()
@@ -90,6 +110,8 @@ describe(":SprintsItem matching", function()
     assert.is_true(commands.item_matches(it9, "i9"))
     assert.is_false(commands.item_matches({ key = "I19", no = "I19" }, "9"))
     assert.is_true(commands.item_matches({ key = "PRJ-I12", no = "PRJ-I12" }, "I12"))
+    assert.is_true(commands.item_matches({ key = "I5", no = "I5" }, "PRJ-I5")) -- from a commit message
+    assert.is_false(commands.item_matches({ key = "I5", no = "I5" }, "PRJ-I15"))
   end)
 end)
 

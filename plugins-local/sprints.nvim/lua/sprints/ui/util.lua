@@ -65,24 +65,70 @@ function M.named_scratch(name, filetype)
   return bufnr, true
 end
 
---- Show a buffer: focus its window if visible, otherwise open it in a split.
---- opts.reuse_window: if the current window already shows a sprints buffer, show it there instead
---- of splitting again (worklist next/prev would otherwise stack up splits).
+--- The current window holds nothing worth keeping: an unnamed, unmodified, empty buffer
+--- (what you get on a bare `nvim`). Splitting next to it only wastes half the screen.
+local function current_is_blank()
+  local buf = vim.api.nvim_get_current_buf()
+  return vim.api.nvim_buf_get_name(buf) == ""
+    and vim.bo[buf].buftype == ""
+    and not vim.bo[buf].modified
+    and vim.api.nvim_buf_line_count(buf) == 1
+    and vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1] == ""
+end
+
+--- A window in this tab showing a buffer of `filetype`, or nil.
+local function window_with(filetype)
+  for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+    if vim.bo[vim.api.nvim_win_get_buf(win)].filetype == filetype then
+      return win
+    end
+  end
+  return nil
+end
+
+--- Show a buffer, choosing the window so views don't pile up as splits:
+---   already visible        -> focus it
+---   opts.role = "item"     -> reuse the window showing an item; else from a list, a vertical
+---                             split beside it (list | item) when there's room
+---   opts.role = "list"     -> reuse the window showing a list
+---   blank startup window   -> use it
+---   otherwise              -> config.open_cmd
+--- opts.reuse_window: if the current window shows a sprints buffer, replace it.
 function M.show(bufnr, opts)
   opts = opts or {}
   local winid = vim.fn.bufwinid(bufnr)
-  if winid == -1 then
-    local open_cmd = require("sprints.config").options.open_cmd or "split"
-    if opts.reuse_window and vim.bo.filetype:match("^sprints%-") then
-      open_cmd = "edit"
-    end
-    if open_cmd ~= "edit" then
-      vim.cmd(open_cmd)
-    end
-    vim.api.nvim_win_set_buf(0, bufnr)
-  else
-    vim.api.nvim_set_current_win(winid)
+  if winid ~= -1 then
+    return vim.api.nvim_set_current_win(winid)
   end
+
+  local target = opts.role and window_with("sprints-" .. opts.role)
+  if target then
+    vim.api.nvim_set_current_win(target)
+    return vim.api.nvim_win_set_buf(target, bufnr)
+  end
+
+  local open_cmd = require("sprints.config").options.open_cmd or "split"
+  if current_is_blank() or (opts.reuse_window and vim.bo.filetype:match("^sprints%-")) then
+    open_cmd = "edit"
+  elseif opts.role == "item" and vim.bo.filetype == "sprints-list" then
+    open_cmd = vim.api.nvim_win_get_width(0) >= 120 and "rightbelow vsplit" or "rightbelow split"
+  end
+  if open_cmd ~= "edit" then
+    vim.cmd(open_cmd)
+  end
+  vim.api.nvim_win_set_buf(0, bufnr)
+end
+
+--- Copy to the unnamed and system clipboard registers, and say what was copied.
+function M.yank(text, what)
+  vim.fn.setreg('"', text)
+  pcall(vim.fn.setreg, "+", text) -- no clipboard provider: the unnamed register still works
+  vim.notify(("sprints.nvim: copied %s: %s"):format(what, text))
+end
+
+--- Ask before something destructive. Default answer is No.
+function M.confirm(question)
+  return vim.fn.confirm(question, "&Yes\n&No", 2) == 1
 end
 
 function M.notify_error(prefix, err)

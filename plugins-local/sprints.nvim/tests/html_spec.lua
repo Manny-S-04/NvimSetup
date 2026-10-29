@@ -7,8 +7,12 @@ describe("sprints.html.to_lines", function()
   end)
 
   it("renders lists, headings, emphasis and links", function()
-    assert.are.same({ "### Title", "", "- **a**", "- see docs (https://x.y)" },
+    assert.are.same({ "# Title", "", "- **a**", "- see [docs](https://x.y)" },
       html.to_lines('<h1>Title</h1><ul><li><b>a</b></li><li>see <a href="https://x.y">docs</a></li></ul>'))
+  end)
+
+  it("numbers ordered lists", function()
+    assert.are.same({ "1. a", "2. b", "", "- c" }, html.to_lines("<ol><li>a</li><li>b</li></ol><ul><li>c</li></ul>"))
   end)
 
   it("keeps <pre> content verbatim in a fence", function()

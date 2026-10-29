@@ -151,10 +151,24 @@ function M.quote_big_ints(json)
   return table.concat(out)
 end
 
+-- curl exit codes worth explaining; anything else shows curl's own message.
+local CURL_ERRORS = {
+  [6] = "can't resolve the Zoho host (offline, or wrong dc?)",
+  [7] = "can't connect to Zoho (offline or blocked?)",
+  [28] = "Zoho didn't answer in time (raise `timeout`?)",
+  [35] = "TLS handshake with Zoho failed (proxy intercepting?)",
+  [60] = "Zoho's certificate isn't trusted (corporate proxy? set CURL_CA_BUNDLE)",
+}
+
 function M.parse_result(sys_result)
   if sys_result.code ~= 0 then
-    local stderr = sys_result.stderr and sys_result.stderr ~= "" and (": " .. vim.trim(sys_result.stderr)) or ""
-    return nil, { message = "curl exited with code " .. tostring(sys_result.code) .. stderr, type = "transport" }
+    local known = CURL_ERRORS[sys_result.code]
+    local stderr = sys_result.stderr and vim.trim(sys_result.stderr) or ""
+    return nil, {
+      message = known or ("curl failed (exit %d)%s"):format(sys_result.code, stderr ~= "" and (": " .. stderr) or ""),
+      type = "transport",
+      detail = stderr,
+    }
   end
   local body, status_str = (sys_result.stdout or ""):match("^(.*)" .. STATUS_MARKER .. "(%d+)%s*$")
   if not body then

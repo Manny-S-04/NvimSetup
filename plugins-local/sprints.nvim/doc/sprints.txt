@@ -6,6 +6,7 @@ CONTENTS                                                     *sprints.nvim*
   Setup ................ |sprints-setup|
   Configuration ........ |sprints-config|
   Commands ............. |sprints-commands|
+  Editing .............. |sprints-edit|
 
 ==============================================================================
 SETUP                                                        *sprints-setup*
@@ -31,6 +32,7 @@ CONFIGURATION                                               *sprints-config*
     team_id = nil, project_id = nil, user_id = nil, email = nil,
     page_size = 100,
     item_url = "https://sprints.zoho.{dc}/team/{team}#itemdetails/P{project}/I{item}",
+    api_url = nil, accounts_url = nil, -- host overrides (mock server, proxy)
     open_cmd = "split",       -- "split" | "vsplit" | "tabnew" | "edit"
     keymaps = { item = { ... }, list = { ... } }, -- false disables a key
   })
@@ -42,17 +44,29 @@ Explicit options win over environment variables, which win over defaults.
 COMMANDS                                                  *sprints-commands*
 
 :SprintsMine             Your items in the active sprint(s).
-:SprintsSprint [pick]    Items in the active sprint(s), or pick any sprint.
+:SprintsBoard            Active sprint(s) grouped by status.
 :SprintsBacklog          Items in the project backlog.
-:SprintsItem [NO]        Open an item by number (default: word under cursor).
+:SprintsNew              New item; :w creates.
+:SprintsItem [NO]        Open an item (I12, 12, PRJ-I12; default: under cursor).
+:SprintsSearch {words}   Items whose title has every word.
+:SprintsSprint [pick]    Items in the active sprint(s), or pick any sprint.
 :SprintsProject          Switch project for this session.
 :SprintsRefresh          Refresh the current item buffer.
 :SprintsRaw {what}       Raw API response (teams, projects, project,
                          sprints, statuses, users).
 :Sprints                 Help.
 
-List buffer: <CR> open, m only mine, gx browser, r refresh, q close.
-Item buffer: s status, c comment (:w posts), a assign to me, A unassign,
+List buffer: <CR> open, n new, b board, m only mine, yk/yu copy key/link,
+gx browser, r refresh, g? help.
+Item buffer: s status, e edit (:w saves), c comment (:w posts), a add/remove
+me, o add/remove owner, A remove all owners, p priority, yk/yu copy key/link,
 gx browser, gR raw response, r refresh, g? help.
+
+==============================================================================
+EDITING                                                     *sprints-edit*
+
+`e` in an item and |:SprintsNew| open a buffer: "# Title" on line 1, then
+"Field: value" lines, then "---" and the description in markdown. Allowed
+values show as virtual text. :w sends only the changed fields.
 
  vim:tw=78:ts=8:ft=help:norl:

@@ -44,10 +44,19 @@ function M.to_lines(html)
     if not is_code then
       text = text:gsub("\n", " ")
       text = text:gsub("<br%s*/?>", "\n")
+      -- Output is markdown that sprints.markdown.to_html turns back into the same HTML, so an
+      -- edit round trip doesn't drift: heading levels kept, ordered lists numbered, links [t](u).
       text = text:gsub("<h(%d)[^>]*>", function(n)
-        return "\n\n" .. string.rep("#", math.min(6, tonumber(n) + 2)) .. " "
+        return "\n\n" .. string.rep("#", math.min(6, tonumber(n))) .. " "
       end)
       text = text:gsub("</h%d>", "\n\n")
+      text = text:gsub("<ol[^>]*>(.-)</ol>", function(inner)
+        local n = 0
+        return "\n" .. inner:gsub("<li[^>]*>", function()
+          n = n + 1
+          return "\n" .. n .. ". "
+        end) .. "\n"
+      end)
       text = text:gsub("<li[^>]*>", "\n- ")
       text = text:gsub("</?[ou]l[^>]*>", "\n")
       text = text:gsub("<[/]?div[^>]*>", "\n"):gsub("<[/]?p[^>]*>", "\n"):gsub("</li>", "")
@@ -55,7 +64,7 @@ function M.to_lines(html)
       text = text:gsub("</?code>", "`")
       text = text:gsub('<a[^>]-href="([^"]*)"[^>]*>(.-)</a>', function(href, label)
         label = label:gsub("<[^>]->", "")
-        return (label == href or label == "") and href or (label .. " (" .. href .. ")")
+        return (label == href or label == "") and href or ("[" .. label .. "](" .. href .. ")")
       end)
       text = text:gsub("<[^>]->", "")
     end
