@@ -10,6 +10,7 @@ local META_FIELDS = {
   { key = "assignee", label = "Assignee" },
   { key = "reporter", label = "Reporter" },
   { key = "priority", label = "Priority" },
+  { key = "parent", label = "Parent" },
   { key = "issue_type", label = "Issue Type" },
   { key = "sprint", label = "Sprint" },
 }
