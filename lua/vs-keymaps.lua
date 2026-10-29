@@ -55,7 +55,22 @@ map("n", "<leader>dl", function()
 end, { desc = "Debug: tracepoint (log, don't stop)" })
 map("n", "<leader>da", dotnet("debug attach"), { desc = "Debug: attach to process" })
 map("n", "<leader>dr", function() dap().repl.toggle() end, { desc = "Debug: Immediate window (REPL)" })
-map("n", "<leader>du", function() require("dapui").toggle() end, { desc = "Debug: toggle windows" })
+-- dapui.toggle()/open() treat a layout as open if ANY of its windows is, so after :q on one panel
+-- (e.g. the console with "Now listening on") they never bring it back. Instead: all six panels up →
+-- hide them; anything missing → close what's left and reopen the full layout at its original sizes.
+local DEBUG_PANELS = 6 -- scopes, watches, stacks, breakpoints | console, repl (lua/plugins/debug.lua)
+map("n", "<leader>du", function()
+    local dapui = require("dapui")
+    local shown = 0
+    for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+        local ft = vim.bo[vim.api.nvim_win_get_buf(win)].filetype
+        if ft:match("^dapui_") or ft == "dap-repl" or ft == "dap-terminal" then shown = shown + 1 end
+    end
+    dapui.close()
+    if shown < DEBUG_PANELS then dapui.open({ reset = true }) end
+end, { desc = "Debug: show/hide windows (restores closed ones)" })
+map("n", "<leader>do", function() require("dapui").float_element("console", { enter = true }) end,
+    { desc = "Debug: program output in a float (ports, logs)" })
 map("n", "<leader>z", function() require("zoom").toggle() end, { desc = "Zoom: current window full-screen / back" })
 map("n", "<leader>dp", function() dap().pause() end, { desc = "Debug: pause (Break All)" })
 map("n", "<leader>dk", function() dap().up() end, { desc = "Debug: up the call stack" })

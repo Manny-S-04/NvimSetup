@@ -57,6 +57,7 @@ return {
             { keys = "<F9>", text = "Add/remove a breakpoint — takes effect immediately" },
             { keys = "<leader>dp", text = "Pause right now (VS: Break All)" },
             { keys = "<leader>du", text = "Peek at the debug windows / program output (they auto-hide while running)" },
+            { keys = "<leader>do", text = "Program output in a float (which port the API is on)" },
             { keys = "<leader>z", text = "Zoom this window full-screen / back" },
             { keys = "<S-F5>", text = "Stop debugging" },
             { keys = "<C-S-F5>", text = "Restart" },
