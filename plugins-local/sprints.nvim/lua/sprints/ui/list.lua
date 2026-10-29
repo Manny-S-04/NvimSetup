@@ -18,8 +18,13 @@ local function load(bufnr)
   local title = vim.b[bufnr].sprints_list_title
   util.set_lines(bufnr, { "# " .. title, "", "Loading…" })
 
+  -- Only the latest load may render: a slower, older response (r or m pressed mid-load,
+  -- or the list reopened) would otherwise overwrite the newer one.
+  s.generation = (s.generation or 0) + 1
+  local generation = s.generation
+
   s.fetch(s.mine_only, function(results, err, new_title)
-    if not vim.api.nvim_buf_is_valid(bufnr) then
+    if not vim.api.nvim_buf_is_valid(bufnr) or state[bufnr] ~= s or s.generation ~= generation then
       return
     end
     if new_title then

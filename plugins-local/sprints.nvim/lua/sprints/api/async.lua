@@ -53,9 +53,13 @@ end
 ---@param cb fun(bodies: table[]|nil, err: table|nil)
 function M.pages(path, query, prefix, cb)
   local size = config.options.page_size or 100
-  local bodies, seen = {}, {}
-  local MAX_PAGES = 20 -- 2000 rows: past this it's a runaway, not a backlog
+  local bodies, seen, total = {}, {}, 0
+  local MAX_ROWS = 2000 -- past this it's a runaway, not a backlog
 
+  -- Stops on an empty page, not a short one: if Zoho caps `range` below page_size without
+  -- saying so, every page is "short" and stopping there would silently truncate the list.
+  -- The cost is one extra (empty) request at the end. The next index advances by the rows
+  -- actually returned, for the same reason.
   local function page(index)
     local q = vim.tbl_extend("force", {}, query or {}, { index = index, range = size })
     client.request("GET", path, { query = q }, function(result, err)
@@ -70,15 +74,19 @@ function M.pages(path, query, prefix, cb)
           seen[r.id], fresh = true, fresh + 1
         end
       end
-      -- A page of only already-seen ids means the server ignored `index`: stop, don't duplicate.
-      if fresh == 0 and #bodies > 0 then
+      -- No new ids: the end, or the server ignoring `index` (repeating a page). Either way, stop.
+      if fresh == 0 then
+        if #bodies == 0 then
+          table.insert(bodies, body) -- keep page 1 even if `prefix` didn't match: callers may decode it differently
+        end
         return cb(bodies, nil)
       end
       table.insert(bodies, body)
-      if #rows < size or #bodies >= MAX_PAGES then
+      total = total + fresh
+      if total >= MAX_ROWS then
         return cb(bodies, nil)
       end
-      page(index + size)
+      page(index + #rows)
     end)
   end
   page(1)
@@ -86,9 +94,14 @@ end
 
 --- Rows of `prefix` across bodies, plus every other <x>JObj merged by id (side tables).
 function M.merge(bodies, prefix)
-  local rows, side = {}, {}
+  local rows, side, seen = {}, {}, {}
   for _, body in ipairs(bodies) do
-    vim.list_extend(rows, decode.rows(body, prefix))
+    for _, r in ipairs(decode.rows(body, prefix)) do
+      if not seen[r.id] then -- pages can overlap
+        seen[r.id] = true
+        table.insert(rows, r)
+      end
+    end
     for k in pairs(body) do
       local other = type(k) == "string" and k:match("^(.-)JObj$")
       if other and other ~= prefix then

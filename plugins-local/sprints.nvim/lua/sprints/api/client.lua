@@ -106,6 +106,51 @@ function M.error_in_body(decoded)
   return nil
 end
 
+--- Zoho ids are ~17-digit integers. Lua numbers are doubles (53-bit), so a bare 17-digit
+--- JSON number decodes lossily (13969123456722011 -> 1.3969123456722e+16) and then never
+--- matches the same id elsewhere. Wrap integers of 16+ digits in quotes before decoding.
+--- Only text outside JSON strings is touched, so ids quoted in descriptions stay intact.
+local function quote_segment(seg)
+  return (seg:gsub("()(%-?%d+)()", function(s, digits, e)
+    local before, after = seg:sub(s - 1, s - 1), seg:sub(e, e)
+    if #digits:gsub("^%-", "") < 16 or before:match("[%w%.]") or after:match("[%.eE%w]") then
+      return nil -- short, or part of a float / exponent
+    end
+    return '"' .. digits .. '"'
+  end))
+end
+
+function M.quote_big_ints(json)
+  if not json:find("%d%d%d%d%d%d%d%d%d%d%d%d%d%d%d%d") then
+    return json -- fast path: nothing long enough
+  end
+  local out, i, n = {}, 1, #json
+  while i <= n do
+    local q = json:find('"', i, true)
+    table.insert(out, quote_segment(json:sub(i, (q or n + 1) - 1)))
+    if not q then
+      break
+    end
+    local j = q + 1 -- copy the string literal verbatim, honouring \" escapes
+    while true do
+      local e = json:find('["\\]', j)
+      if not e then
+        j = n + 1
+        break
+      end
+      if json:sub(e, e) == "\\" then
+        j = e + 2
+      else
+        j = e + 1
+        break
+      end
+    end
+    table.insert(out, json:sub(q, j - 1))
+    i = j
+  end
+  return table.concat(out)
+end
+
 function M.parse_result(sys_result)
   if sys_result.code ~= 0 then
     local stderr = sys_result.stderr and sys_result.stderr ~= "" and (": " .. vim.trim(sys_result.stderr)) or ""
@@ -118,7 +163,7 @@ function M.parse_result(sys_result)
   local status = tonumber(status_str)
   local decoded = nil
   if body ~= "" then
-    local ok, v = pcall(vim.json.decode, body, { luanil = { object = true, array = true } })
+    local ok, v = pcall(vim.json.decode, M.quote_big_ints(body), { luanil = { object = true, array = true } })
     if ok then
       decoded = v
     end

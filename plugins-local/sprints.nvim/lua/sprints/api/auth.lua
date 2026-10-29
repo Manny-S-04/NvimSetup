@@ -15,6 +15,20 @@ function M.invalidate()
   cached = nil
 end
 
+--- Token lifetime in seconds. Older Zoho responses put milliseconds in expires_in
+--- (3600000) alongside expires_in_sec; reading that as seconds would trust a 1-hour token
+--- for 41 days. Capped at an hour either way.
+function M.lifetime_seconds(body)
+  local s = tonumber(body.expires_in_sec)
+  if not s then
+    s = tonumber(body.expires_in) or 3600
+    if s > 86400 then
+      s = s / 1000
+    end
+  end
+  return math.min(s, 3600)
+end
+
 local function flush(token, err)
   local queue = waiting or {}
   waiting = nil
@@ -62,7 +76,7 @@ function M.token(cb)
     end
     cached = {
       token = body.access_token,
-      expires_at = os.time() + math.max(0, (tonumber(body.expires_in) or 3600) - EARLY_SECONDS),
+      expires_at = os.time() + math.max(0, M.lifetime_seconds(body) - EARLY_SECONDS),
     }
     flush(cached.token, nil)
   end)

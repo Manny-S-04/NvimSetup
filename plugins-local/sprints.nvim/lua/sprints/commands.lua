@@ -123,17 +123,36 @@ local function cmd_backlog()
   end)
 end
 
+--- Item reference in a word like "PRJ-I12,", "(I12)", "#12" or "12"; nil if there's none.
+function M.ref_in_word(word)
+  return word:match("[%w%-]*%d+")
+end
+
+--- Does `wanted` (as typed: "I12", "PRJ-I12", "#12", "12") name this item?
+--- A bare number matches the item whose key/number ends in exactly those digits.
+function M.item_matches(it, wanted)
+  local w = wanted:upper():gsub("^#", "")
+  local key, no = (it.key or ""):upper(), tostring(it.no or ""):upper()
+  if w == key or w == no then
+    return true
+  end
+  if w:match("^%d+$") then
+    return key:match("(%d+)$") == w or no:match("(%d+)$") == w
+  end
+  local suffix = "%-" .. vim.pesc(w) .. "$"
+  return key:match(suffix) ~= nil or no:match(suffix) ~= nil
+end
+
 --- :SprintsItem I123 — search the active sprint(s) and the backlog for that item number.
 --- (Zoho has no "get item by number" call, so this is a scan.)
 local function cmd_item(cmd_opts)
   local wanted = vim.trim(cmd_opts.args or "")
   if wanted == "" then
-    wanted = vim.fn.expand("<cWORD>"):match("[%w]+%-?I?%d+") or ""
+    wanted = M.ref_in_word(vim.fn.expand("<cWORD>")) or ""
   end
   if wanted == "" then
     return vim.notify("sprints.nvim: usage :SprintsItem <item number> (or cursor on one)", vim.log.levels.WARN)
   end
-  local norm = wanted:upper():gsub("^#", "")
   require("sprints.ui.context").project(function(team, project)
     local async = api("async")
     async.all({
@@ -161,8 +180,7 @@ local function cmd_item(cmd_opts)
           return notify_error("could not search", ierr)
         end
         for _, it in ipairs(list) do
-          local key, no = (it.key or ""):upper(), tostring(it.no or ""):upper()
-          if key == norm or no == norm or key:match("%-" .. vim.pesc(norm) .. "$") or ("I" .. no) == norm then
+          if M.item_matches(it, wanted) then
             return require("sprints.ui.item").open_ref(it.ref, it.key)
           end
         end

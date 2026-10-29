@@ -15,23 +15,29 @@ local function prop_map(body, prefix)
   return nil
 end
 
+--- Ids in the server's order, then any JObj entries the order list didn't mention (sorted, so
+--- the result is stable). Without that second pass, an order list that doesn't line up with
+--- the JObj keys would silently drop rows.
 local function ordered_ids(body, prefix, jobj)
+  local out, used = {}, {}
   local ids = body[prefix .. "Ids"] or body[prefix .. "ids"]
-  if type(ids) == "table" and #ids > 0 then
-    local out = {}
+  if type(ids) == "table" then
     for _, id in ipairs(ids) do
-      if jobj[tostring(id)] ~= nil then
-        table.insert(out, tostring(id))
+      local k = tostring(id)
+      if jobj[k] ~= nil and not used[k] then
+        used[k] = true
+        table.insert(out, k)
       end
     end
-    return out
   end
-  local out = {}
+  local rest = {}
   for id in pairs(jobj) do
-    table.insert(out, id)
+    if not used[id] then
+      table.insert(rest, id)
+    end
   end
-  table.sort(out) -- no order given: stable rather than hash order
-  return out
+  table.sort(rest)
+  return vim.list_extend(out, rest)
 end
 
 --- One positional row -> named table.
@@ -52,6 +58,7 @@ local function name_row(id, values, props)
   if row.name == nil and type(values[1]) ~= "table" then
     row.name = values[1] -- every Zoho JObj puts the display name first
   end
+  row.id = id -- the JObj key is the id; a prop literally named "id" must not replace it
   return row
 end
 
@@ -119,11 +126,6 @@ function M.id_list(v)
     table.insert(out, part)
   end
   return out
-end
-
---- Count of rows on a page, for pagination (index/range): fewer than range = last page.
-function M.count(body, prefix)
-  return #M.rows(body, prefix)
 end
 
 return M

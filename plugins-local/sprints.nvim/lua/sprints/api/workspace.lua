@@ -9,9 +9,11 @@ local decode = require("sprints.api.decode")
 local M = {}
 
 local meta_cache = {} -- "team/project" -> meta
+local me_cache = {} -- "team/project/email" -> user id
 
 function M.clear_cache()
   meta_cache = {}
+  me_cache = {}
 end
 
 --- Rows from whichever of several candidate prefixes the body actually uses.
@@ -66,30 +68,60 @@ end
 
 --- Lookup tables for one project.
 --- @return { statuses: table, types: table, priorities: table, users: table, status_order: string[] }
+local meta_waiting = {} -- key -> callbacks queued behind an in-flight fetch
+
+--- rows_any across several page bodies.
+local function rows_across(bodies, prefixes)
+  local out = {}
+  for _, b in ipairs(bodies) do
+    vim.list_extend(out, rows_any(b, prefixes))
+  end
+  return out
+end
+
 function M.meta(team, project, cb)
   local key = team .. "/" .. project
   if meta_cache[key] then
     return async.ok(cb, meta_cache[key])
   end
+  -- Parallel callers (e.g. one items.list per sprint) share one fetch instead of each
+  -- firing the same four requests.
+  if meta_waiting[key] then
+    return table.insert(meta_waiting[key], cb)
+  end
+  meta_waiting[key] = { cb }
+  local function finish(meta, err)
+    local queue = meta_waiting[key] or {}
+    meta_waiting[key] = nil
+    for _, waiter in ipairs(queue) do
+      waiter(meta, err)
+    end
+  end
+
   local base = ("/team/%s/projects/%s"):format(team, project)
   local function get(path, query)
     return function(done)
       client.request("GET", base .. path, { query = query }, function(result, err)
-        done(result and (result.body or {}) or nil, err)
+        done(result and { result.body or {} } or nil, err)
       end)
+    end
+  end
+  local function paged(path, query, prefix)
+    return function(done)
+      async.pages(base .. path, query, prefix, done)
     end
   end
 
   async.all({
     get("/itemstatus/", { action = "data" }),
     get("/itemtype/", { action = "alldata" }),
-    get("/priority/", { action = "data", index = 1, range = 100 }),
-    get("/users/", { action = "data", index = 1, range = 300 }),
-  }, function(bodies, err)
-    if not bodies then
-      return cb(nil, err)
+    paged("/priority/", { action = "data" }, "projPriority"),
+    paged("/users/", { action = "data" }, "user"), -- paged: a fixed range could miss people
+  }, function(results, err)
+    if not results then
+      return finish(nil, err)
     end
-    local status_rows = rows_any(bodies[1], { "status", "itemStatus", "projItemStatus", "itemstatus", "projStatus" })
+    local status_rows = rows_across(results[1], { "status", "itemStatus", "projItemStatus", "itemstatus", "projStatus" })
     local order = {}
     for _, r in ipairs(status_rows) do
       table.insert(order, r.id)
@@ -97,16 +129,15 @@ function M.meta(team, project, cb)
     local meta = {
       statuses = by_id_with_name(status_rows, { "statusName", "name" }),
       status_order = order,
-      types = by_id_with_name(rows_any(bodies[2], { "projItemType", "itemType" }), { "itemTypeName", "name" }),
-      priorities = by_id_with_name(rows_any(bodies[3], { "projPriority", "priority" }), { "priorityName", "name" }),
-      users = by_id_with_name(rows_any(bodies[4], { "user", "projUser" }), { "userName", "displayName", "name" }),
+      types = by_id_with_name(rows_across(results[2], { "projItemType", "itemType" }), { "itemTypeName", "name" }),
+      priorities = by_id_with_name(rows_across(results[3], { "projPriority", "priority" }), { "priorityName", "name" }),
+      users = by_id_with_name(rows_across(results[4], { "user", "projUser" }), { "userName", "displayName", "name" }),
     }
     meta_cache[key] = meta
-    cb(meta, nil)
+    finish(meta, nil)
   end)
 end
 
-local me_cache = nil
 
 --- Your Sprints user id: config.user_id, else the project user whose email matches config.email.
 function M.me(team, project, cb)
@@ -114,11 +145,12 @@ function M.me(team, project, cb)
   if config.present(o.user_id) then
     return async.ok(cb, tostring(o.user_id))
   end
-  if me_cache then
-    return async.ok(cb, me_cache)
-  end
   if not config.present(o.email) then
     return async.fail(cb, "set user_id (ZOHO_SPRINTS_USER) or email (ZOHO_EMAIL) so I know who you are", "config")
+  end
+  local cache_key = ("%s/%s/%s"):format(team, project, o.email:lower())
+  if me_cache[cache_key] then
+    return async.ok(cb, me_cache[cache_key])
   end
   M.meta(team, project, function(meta, err)
     if not meta then
@@ -128,7 +160,7 @@ function M.me(team, project, cb)
     for id, u in pairs(meta.users) do
       local email = decode.pick(u, { "email", "emailId", "mailId", "userEmail", "emailAddress" })
       if type(email) == "string" and email:lower() == want then
-        me_cache = id
+        me_cache[cache_key] = id
         return cb(id, nil)
       end
     end

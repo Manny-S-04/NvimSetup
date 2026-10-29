@@ -18,16 +18,22 @@ function M.state_of(row)
   if M.SPRINT_TYPES[s] then
     return M.SPRINT_TYPES[s]
   end
-  s = s:lower()
-  for _, known in pairs(M.SPRINT_TYPES) do
-    if s:find(known, 1, true) then
-      return known
-    end
-  end
-  if s:find("progress", 1, true) or s:find("start", 1, true) then
-    return "active"
-  end
-  return s
+  -- Whole-word names only: a substring test would read "inactive" as "active".
+  s = vim.trim(s:lower())
+  local ALIASES = {
+    upcoming = "upcoming",
+    active = "active",
+    ["in progress"] = "active",
+    inprogress = "active",
+    started = "active",
+    running = "active",
+    completed = "completed",
+    complete = "completed",
+    closed = "completed",
+    cancelled = "cancelled",
+    canceled = "cancelled",
+  }
+  return ALIASES[s] or s
 end
 
 function M.normalise(row)
@@ -69,6 +75,7 @@ function M.active(team, project, cb)
 end
 
 --- Depth-first search for a key, case-insensitively (backlogId's location isn't documented).
+--- Skips *_prop maps: there the value is a column index, not an id.
 local function find_key(t, wanted, depth)
   if type(t) ~= "table" or depth > 6 then
     return nil
@@ -78,15 +85,30 @@ local function find_key(t, wanted, depth)
       return tostring(v)
     end
   end
-  for _, v in pairs(t) do
-    local found = find_key(v, wanted, depth + 1)
-    if found then
-      return found
+  for k, v in pairs(t) do
+    if not (type(k) == "string" and k:lower():match("_?props?$")) then
+      local found = find_key(v, wanted, depth + 1)
+      if found then
+        return found
+      end
     end
   end
   return nil
 end
 M._find_key = find_key
+
+--- backlogId from project details: the decoded positional row first, then a key search.
+function M.backlog_from_details(body, project)
+  for _, row in ipairs(decode.rows(body, "project")) do
+    if row.id == tostring(project) or #decode.rows(body, "project") == 1 then
+      local id = decode.pick(row, { "backlogId", "backlogid", "backLogId" })
+      if id then
+        return tostring(id)
+      end
+    end
+  end
+  return find_key(body, "backlogid", 0)
+end
 
 local backlog_cache = {}
 
@@ -100,7 +122,7 @@ function M.backlog_id(team, project, cb)
       if not result then
         return cb(nil, err)
       end
-      local id = find_key(result.body, "backlogid", 0)
+      local id = M.backlog_from_details(result.body, project)
       if not id then
         return cb(nil, { message = "project details have no backlogId (see :SprintsRaw project)", type = "api" })
       end

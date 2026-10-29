@@ -94,6 +94,12 @@ function M.setup(opts)
     end
   end
   M.options = vim.tbl_deep_extend("force", vim.deepcopy(defaults), from_env, opts or {})
+  -- New credentials / project: tokens and lookups cached for the old ones are stale.
+  -- (pcall: clearing a cache must never be what breaks setup.)
+  pcall(function()
+    require("sprints.api.auth").invalidate()
+    require("sprints.api.workspace").clear_cache()
+  end)
   return M.options
 end
 
