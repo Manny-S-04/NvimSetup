@@ -81,21 +81,58 @@ function M.sort(list)
   return list
 end
 
+-- One request per sprintType. Zoho's sprints list filters by a `type` JSON array; with no
+-- `type` it returned only part of a real project (an upcoming sprint, not the active ones).
+M.LIST_TYPES = { 2, 1, 3, 4 }
+
+--- Merge per-type results into sprints. The state comes from the type that was queried
+--- (the rows don't reliably carry it). If an id comes back under more than one type, the
+--- server ignored `type`, so fall back to whatever the row itself says.
+---@param results { code: integer, rows: table[] }[]
+function M.from_typed(results)
+  local count, first = {}, {}
+  for _, res in ipairs(results) do
+    for _, r in ipairs(res.rows) do
+      count[r.id] = (count[r.id] or 0) + 1
+      first[r.id] = first[r.id] or { row = r, code = res.code }
+    end
+  end
+  local out = {}
+  for id, hit in pairs(first) do
+    local s = M.normalise(hit.row)
+    if count[id] == 1 then
+      s.state = M.SPRINT_TYPES[tostring(hit.code)] or s.state
+    end
+    table.insert(out, s)
+  end
+  return M.sort(out)
+end
+
 function M.list(team, project, cb)
-  async.pages(("/team/%s/projects/%s/sprints/"):format(team, project), { action = "data" }, "sprint",
-    function(bodies, err)
-      if not bodies then
-        return cb(nil, err)
-      end
-      local out, key = {}, team .. "/" .. project
-      names[key] = names[key] or {}
-      for _, r in ipairs((async.merge(bodies, "sprint"))) do
-        local s = M.normalise(r)
-        names[key][s.id] = s.name
-        table.insert(out, s)
-      end
-      cb(M.sort(out), nil)
+  local path = ("/team/%s/projects/%s/sprints/"):format(team, project)
+  local fns = {}
+  for _, code in ipairs(M.LIST_TYPES) do
+    table.insert(fns, function(done)
+      async.pages(path, { action = "data", type = { code } }, "sprint", function(bodies, err)
+        -- One type failing (e.g. Zoho rejecting a code) shouldn't hide the others.
+        done({ code = code, rows = bodies and (async.merge(bodies, "sprint")) or {}, err = err }, nil)
+      end)
     end)
+  end
+  async.all(fns, function(results)
+    local errs = vim.tbl_filter(function(r)
+      return r.err ~= nil
+    end, results)
+    if #errs == #results then
+      return cb(nil, errs[1].err)
+    end
+    local out, key = M.from_typed(results), team .. "/" .. project
+    names[key] = names[key] or {}
+    for _, s in ipairs(out) do
+      names[key][s.id] = s.name
+    end
+    cb(out, nil)
+  end)
 end
 
 --- Active sprints only (a project can run more than one).
