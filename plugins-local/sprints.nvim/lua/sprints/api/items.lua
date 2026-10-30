@@ -29,7 +29,8 @@ local F = {
   updated = { "lastModifiedTime", "lastUpdatedTime", "modifiedTime", "lastModifiedTimeLong" },
   description = { "description", "itemDescription", "desc" },
   epic = { "epicId", "epicid" },
-  parent = { "parentItemId", "parentId" },
+  parent = { "parentItem", "parentItemId", "parentId" },
+  is_parent = { "isParent" },
   sprint = { "sprintId", "sprintid" },
   points = { "point", "points", "storyPoints", "estimationPoint" },
 }
@@ -84,6 +85,18 @@ function M.status_category(name, row)
   return "new"
 end
 
+--- An id field's value, or nil when Zoho means "none" ("", "0", "-1", -1). Pure.
+function M.real_id(v)
+  if v == nil or v == vim.NIL then
+    return nil
+  end
+  local str = tostring(v)
+  if str == "" or str == "0" or str == "-1" then
+    return nil
+  end
+  return str
+end
+
 local function lookup(tbl, id)
   if id == nil then
     return nil
@@ -123,6 +136,7 @@ function M.normalise(row, ref, meta, side)
 
   local no = decode.pick(row, F.no)
   local epic = decode.pick(row, F.epic)
+  local is_parent = decode.pick(row, F.is_parent)
   return {
     id = row.id,
     key = M.display_key(no, row.id),
@@ -134,12 +148,15 @@ function M.normalise(row, ref, meta, side)
     assignee = #owners > 0 and table.concat(owners, ", ") or nil,
     owner_ids = decode.id_list(decode.pick(row, F.owners)),
     reporter = user(decode.pick(row, F.created_by)),
+    created_by_id = M.real_id(decode.pick(row, F.created_by)),
     priority = lookup(meta.priorities, decode.pick(row, F.priority)) or lookup(side.projPriority, decode.pick(row, F.priority)),
     priority_id = decode.pick(row, F.priority) and tostring(decode.pick(row, F.priority)) or nil,
     issue_type = lookup(meta.types, decode.pick(row, F.type)) or lookup(side.projItemType, decode.pick(row, F.type)),
     type_id = decode.pick(row, F.type) and tostring(decode.pick(row, F.type)) or nil,
     points = decode.pick(row, F.points),
     epic = epic and (lookup(side.epic, epic) or tostring(epic)) or nil,
+    parent_id = M.real_id(decode.pick(row, F.parent)),
+    is_parent = is_parent == true or is_parent == "true" or is_parent == 1 or is_parent == "1",
     created = decode.pick(row, F.created),
     updated = decode.pick(row, F.updated),
     description = decode.pick(row, F.description),

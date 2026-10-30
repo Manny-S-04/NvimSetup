@@ -162,7 +162,7 @@ end
 local function cmd_search(cmd_opts)
   local query = vim.trim(cmd_opts.args or "")
   if query == "" then
-    return vim.notify("sprints.nvim: usage :SprintsSearch[!] <words or item number>", vim.log.levels.WARN)
+    return require("sprints.ui.find").open() -- like :JiraSearch with no JQL
   end
   local find = api("find")
   local value = query:match("^[%w%-#]*%d+$") and find.item_number(query) or query
@@ -261,6 +261,83 @@ local function cmd_item(cmd_opts)
   end)
 end
 
+--- The item a hierarchy/worklist command acts on: KEY from the args, else the item buffer
+--- you're in, else the list row under the cursor, else the item number under the cursor.
+--- cb(item) gets a normalised item (with .ref, .parent_id).
+local function with_item(usage, fn)
+  return function(cmd_opts)
+    local wanted = vim.trim(cmd_opts.args or "")
+    if wanted == "" then
+      local here = require("sprints.ui.item").item_of(0)
+        or (vim.bo.filetype == "sprints-list" and require("sprints.ui.list").item_under_cursor(0))
+      if here then
+        return fn(here)
+      end
+      wanted = M.ref_in_word(vim.fn.expand("<cWORD>")) or ""
+    end
+    if wanted == "" then
+      return vim.notify("sprints.nvim: usage " .. usage, vim.log.levels.WARN)
+    end
+    require("sprints.ui.context").project(function(team, project)
+      vim.notify("sprints.nvim: looking for " .. wanted .. "…")
+      api("find").item(team, project, wanted, function(it, note)
+        if not it then
+          return notify_error("could not find " .. wanted, note)
+        end
+        fn(it)
+      end, progress("looking for " .. wanted .. " in"))
+    end)
+  end
+end
+
+local cmd_parent = with_item(":SprintsParent [KEY]", function(it)
+  api("hierarchy").parent(it, function(parent, err)
+    if err then
+      return notify_error("could not open " .. it.key .. "'s parent", err)
+    end
+    if not parent then
+      return vim.notify("sprints.nvim: " .. it.key .. " has no parent", vim.log.levels.WARN)
+    end
+    require("sprints.ui.item").open(parent)
+  end)
+end)
+
+local cmd_children = with_item(":SprintsChildren [KEY]", function(it)
+  require("sprints.ui.list").open_children(it)
+end)
+
+local cmd_work = with_item(":SprintsWork [KEY]", function(it)
+  require("sprints.worklist").work(it)
+end)
+
+local function cmd_worklist(cmd_opts)
+  local sub = vim.trim(cmd_opts.args or "")
+  local wl = require("sprints.worklist")
+  if sub == "" then
+    wl.open()
+  elseif sub == "refresh" then
+    wl.refresh()
+  elseif sub == "add" then
+    wl.add()
+  elseif sub == "next" then
+    wl.next()
+  elseif sub == "prev" then
+    wl.prev()
+  else
+    vim.notify("sprints.nvim: usage :SprintsWorklist [refresh|add|next|prev]", vim.log.levels.WARN)
+  end
+end
+
+local function cmd_find(cmd_opts)
+  local name = vim.trim(cmd_opts.args or "")
+  if name == "" then
+    return require("sprints.ui.find").open()
+  end
+  if not require("sprints.ui.find").run_preset(name) then
+    vim.notify(("sprints.nvim: no preset %q (see :SprintsFind → Presets…)"):format(name), vim.log.levels.WARN)
+  end
+end
+
 --- :SprintsRaw <what> — raw API responses, for checking the field mapping.
 local RAW = {
   teams = function(_, _, cb)
@@ -327,12 +404,17 @@ local function cmd_help()
     "  :SprintsMine            Your items in the active sprint(s)",
     "  :SprintsBoard           Active sprint(s) grouped by status",
     "  :SprintsNew             New item (in the active sprint; :w creates)",
-    "  :SprintsSearch[!] WORDS Items matching words or a number (open sprints + backlog; ! = all sprints)",
+    "  :SprintsFind [PRESET]   Build a query from menus, or run a saved preset",
+    "  :SprintsSearch[!] WORDS Items matching words or a number (open sprints + backlog; ! = all sprints); no arg = :SprintsFind",
     "  :SprintsSprint [pick]   Active sprint(s); pick = choose any sprint",
     "  :SprintsBacklog         The project backlog",
     "  :SprintsItem [NO]       Open an item by number (defaults to the word under the cursor)",
     "  :SprintsProject         Switch project for this session",
     "  :SprintsRefresh         Refresh the current item buffer",
+    "  :SprintsParent [KEY]    Open KEY's parent",
+    "  :SprintsChildren [KEY]  List KEY's sub items",
+    "  :SprintsWork [KEY]      Worklist = KEY's parent's sub items (needs harpoon)",
+    "  :SprintsWorklist [sub]  Open the worklist; refresh | add | next | prev",
     "  :SprintsRaw <what>      Raw API response (teams|projects|project|sprints|statuses|users|get PATH k=v…)",
     "",
     "In a list or an item, g? shows its keys.",
@@ -354,7 +436,24 @@ local COMMANDS = {
   { "SprintsMine", function() open_active({ mine_only = true }) end, { nargs = 0, desc = "Your items in the active sprint" } },
   { "SprintsBoard", function() open_active({ group = true }) end, { nargs = 0, desc = "Active sprint grouped by status" } },
   { "SprintsNew", cmd_new, { nargs = 0, desc = "Create a Zoho Sprints item (:w creates)" } },
-  { "SprintsSearch", cmd_search, { nargs = "+", bang = true, desc = "Find items by words or number (! = all sprints)" } },
+  { "SprintsSearch", cmd_search, { nargs = "*", bang = true, desc = "Find items by words or number (! = all sprints)" } },
+  { "SprintsFind", cmd_find, {
+    nargs = "?",
+    complete = function()
+      return require("sprints.presets").names()
+    end,
+    desc = "Build a Zoho Sprints query from menus, or run a saved preset",
+  } },
+  { "SprintsParent", cmd_parent, { nargs = "?", desc = "Open the parent of an item" } },
+  { "SprintsChildren", cmd_children, { nargs = "?", desc = "List the sub items of an item" } },
+  { "SprintsWork", cmd_work, { nargs = "?", desc = "Make the parent's sub items your worklist" } },
+  { "SprintsWorklist", cmd_worklist, {
+    nargs = "?",
+    complete = function()
+      return { "refresh", "add", "next", "prev" }
+    end,
+    desc = "Open / refresh / step through the Sprints worklist",
+  } },
   { "SprintsSprint", cmd_sprint, {
     nargs = "?",
     complete = function()

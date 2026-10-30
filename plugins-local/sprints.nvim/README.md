@@ -16,7 +16,12 @@ lua/sprints/
     workspace.lua     teams, projects, statuses/types/priorities/users, "me"
     sprints.lua       sprints, active sprint, backlog id
     items.lua         list, get (+comments), status, owners, comment
-  ui/                 render (pure), item, list, comment, context (pickers)
+    find.lua          item by number / search, sprint by sprint
+    hierarchy.lua     parent / sub items                      (jira.nvim: same)
+    query.lua         :SprintsFind specs, filtered client-side (jira.nvim: jql.lua)
+  presets.lua         saved :SprintsFind queries               (jira.nvim: same)
+  worklist.lua        harpoon list of items                    (jira.nvim: same)
+  ui/                 render (pure), item, list, find, edit, comment, context (pickers)
 ```
 
 Requires Neovim 0.10+ and `curl`.
@@ -65,18 +70,30 @@ that doesn't expire, and the plugin mints short-lived access tokens from it.
 | `:SprintsBacklog` | `<leader>sl` | The backlog |
 | `:SprintsNew` | `<leader>sn` | New item (`:w` creates) |
 | `:SprintsItem [NO]` | `<leader>si` | Open an item: `CV-I12`, `I12`, `#12`, `12`, default word under cursor; searches every sprint |
-| `:SprintsSearch[!] WORDS` | `<leader>ss` | Zoho's search (title or number) in open sprints + backlog; `!` = every sprint |
+| `:SprintsSearch[!] WORDS` | `<leader>ss` | Zoho's search (title or number) in open sprints + backlog; `!` = every sprint; no words = `:SprintsFind` |
+| `:SprintsFind [PRESET]` | `<leader>sf` | Build a query from menus (where, owner, status, type, priority, text, created by me), or run a saved preset |
+| `:SprintsParent [KEY]` | | Open KEY's parent |
+| `:SprintsChildren [KEY]` | | List KEY's sub items |
+| `:SprintsWork [KEY]` | `<leader>sW` | Worklist = KEY's parent's sub items (needs harpoon2) |
+| `:SprintsWorklist [sub]` | `<leader>sw` `sj` `sk` | Open the worklist; `refresh` `add` `next` `prev` |
 | `:SprintsSprint [pick]` | | Active sprint(s); `pick` chooses any (active first) |
 | `:SprintsProject` | | Switch project for the session |
 | `:SprintsRaw <what>` | | Raw API response: `teams projects project sprints statuses users`, `get <path> [k=v ...]` |
 | `:Sprints` | | Help |
 
 **List** — `<CR>` open · `n` new item here · `b` board view · `m` only mine · `yk`/`yu` copy key/link ·
-`gx` browser · `r` refresh · `g?` help
+`gx` browser · `W` this list = worklist · `+` add to worklist · `r` refresh · `g?` help
 
 **Item** — `s` status · `e` edit everything (`:w` saves) · `c` comment (`:w` posts) · `a` add/remove me ·
 `o` add/remove an owner · `A` remove all owners (asks) · `p` priority · `yk`/`yu` copy key/link · `gx` browser ·
-`gR` raw response · `r` refresh · `g?` help
+`gp` parent · `gc` sub items · `W` worklist = parent's items · `+` add to worklist · `gR` raw response ·
+`r` refresh · `g?` help
+
+Item buffers are named by key, `sprints://I22516` (like jira.nvim's `jira://CV-1`), so harpoon,
+`:b` and `:e` find them. A buffer opened from the name alone (harpoon after you closed the
+ticket, `:e`, a session) loads the item, and so does `sprints:/I22516` — the name with its
+slashes collapsed, which is how a path-normalising harpoon config stores it. When lazy-loading,
+add `event = "BufReadCmd sprints:/*"` so this works before any command has run.
 
 ### Editing and creating
 
@@ -103,18 +120,23 @@ bold, italics, code, links, lists, headings and code blocks survive the round tr
 
 ## Differences from jira.nvim, and why
 
-- **No JQL / `:JiraFind`.** Zoho's API has no query language; lists are by sprint, backlog or owner.
+- **`:SprintsFind` builds a spec, not JQL.** Zoho's API has no query language: text goes to
+  Zoho's search, everything else is filtered client-side over the sprints in scope. So there's
+  no "edit JQL by hand", and no "updated within" (the modified-time field isn't confirmed).
 - **No transitions.** Zoho statuses aren't gated by a workflow in the API, so `s` offers every
   project status except the current one.
-- **Items need four ids** (team, project, sprint, item), so buffers carry a `ref`, and
+- **Items need four ids** (team, project, sprint, item), so buffers carry a `ref` (and worklist
+  entries store it, so they open without a search), and
   there's no working project-wide lookup: `:SprintsItem` searches sprint by sprint (6 at a time:
   the sprint it was last found in, then active, backlog, upcoming, completed newest first) and
   remembers each item's sprint in `stdpath("cache")/sprints.nvim/item_sprints.json`. Numbers
   are searched as digits (`CV-I22516` -> `22516`); the prefix is display only.
 - **"Mine" filters client-side.** The server-side owner filter needs board lane ids that differ per project.
-- **Assign to me replaces the owner list.** Zoho items can have several owners.
-- **Not ported yet:** the harpoon worklist and parent/children navigation (Zoho has epics and
-  sub-items rather than Jira's parent field).
+- **Owners, not one assignee.** `a` adds/removes you and keeps the others; changes are sent as
+  `newusers` / `delusers` diffs (update ignores `users`, which is create-only).
+- **Parent / children are sub items.** A row carries `parentItem`; there's no "children of"
+  endpoint, so sub items are the parent's sprint's rows (listed with `subitem=true`) whose
+  parent it is. The parent is fetched in the child's sprint, then the backlog.
 - **Still needs the browser:** moving an item between sprints, editing or deleting comments,
   logging time, attachments. Each needs an endpoint that isn't confirmed yet.
 
@@ -128,6 +150,8 @@ one-line fix:
   names, assumed to match create's (confirmed) plus `statusid` (**unverified**).
 - `items.FIELDS`: candidate field names per attribute; the first one present wins.
 - `sprints.SPRINT_TYPES`: which `sprintType` code means "active". **Unverified.**
+- `hierarchy`: that sub items sit in their parent's sprint, and that item details answer for
+  the parent under the child's sprint id (else the backlog's). **Unverified.**
 
 `gR` in an item and `:SprintsRaw` show the real payloads to check these against. If comments
 fail, the item still opens with the reason shown under *Comments*.
