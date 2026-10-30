@@ -5,6 +5,7 @@
 --
 -- CONFIRMED paths (seen in working third-party clients): list items, item details, create,
 -- and create's form fields (name, description, projitemtypeid, projpriorityid, users, point).
+-- Update takes create's fields + statusid, except owners: newusers=[...] / delusers=[...].
 -- UNVERIFIED (best guesses, isolated here so they're one-line fixes): the comment ("notes")
 -- endpoints, and that update takes the same field names as create (plus statusid). Field names are matched against several
 -- candidates for the same reason; :SprintsRaw / gR show the real payload.
@@ -48,9 +49,13 @@ M.ENDPOINTS = {
     status_id = "statusid",
     type_id = "projitemtypeid",
     priority_id = "projpriorityid",
-    owner_ids = "users",
+    owner_ids = "users", -- create only: update ignores `users`
+    add_owner_ids = "newusers", -- update only
+    del_owner_ids = "delusers", -- update only
     points = "point",
   },
+  create_only = { owner_ids = true },
+  update_only = { add_owner_ids = true, del_owner_ids = true },
   created_id_keys = { "addedItemId", "itemId", "id" },
 }
 
@@ -270,13 +275,19 @@ function M.get(ref, cb)
 end
 
 --- Item fields (keys of ENDPOINTS.form_fields) -> form fields. Unknown keys are an error,
---- not silently dropped, so a typo can't look like a successful save.
-function M.to_form(fields)
+--- not silently dropped, so a typo can't look like a successful save. So is a field the
+--- other mode owns (owner_ids on update, add/del_owner_ids on create): Zoho would ignore it.
+---@param mode "create"|"update"
+function M.to_form(fields, mode)
+  local wrong = mode == "create" and M.ENDPOINTS.update_only or M.ENDPOINTS.create_only
   local form = {}
   for k, v in pairs(fields) do
     local name = M.ENDPOINTS.form_fields[k]
     if not name then
       error("sprints.nvim: unknown item field " .. k)
+    end
+    if wrong[k] then
+      error(("sprints.nvim: %s can't be sent on %s"):format(k, mode))
     end
     form[name] = type(v) == "number" and tostring(v) or v
   end
@@ -285,7 +296,7 @@ end
 
 --- Update some fields of an item. `fields` uses item field names (see form_fields).
 function M.update(ref, fields, cb)
-  local ok, form = pcall(M.to_form, fields)
+  local ok, form = pcall(M.to_form, fields, "update")
   if not ok then
     return async.fail(cb, form)
   end
@@ -302,7 +313,7 @@ function M.create(ref, fields, cb)
   if not (fields.name and fields.name:match("%S")) then
     return async.fail(cb, "an item needs a title")
   end
-  local ok, form = pcall(M.to_form, fields)
+  local ok, form = pcall(M.to_form, fields, "create")
   if not ok then
     return async.fail(cb, form)
   end
@@ -336,8 +347,50 @@ function M.set_status(ref, status_id, cb)
   M.update(ref, { status_id = tostring(status_id) }, cb)
 end
 
-function M.set_owners(ref, user_ids, cb)
-  M.update(ref, { owner_ids = user_ids }, cb)
+--- Owners as update wants them: what to add and what to remove, never the full list
+--- (update ignores `users`). Pure. Empty sides are left out, so no change = {}.
+---@param current string[]|nil owners now
+---@param wanted string[] owners after the change
+---@return { add_owner_ids: string[]|nil, del_owner_ids: string[]|nil }
+function M.owner_changes(current, wanted)
+  local function set_of(ids)
+    local s = {}
+    for _, id in ipairs(ids) do
+      s[tostring(id)] = true
+    end
+    return s
+  end
+  local now, after = set_of(current or {}), set_of(wanted)
+  local add, del = {}, {}
+  for _, id in ipairs(wanted) do
+    id = tostring(id)
+    if not now[id] and not vim.tbl_contains(add, id) then
+      table.insert(add, id)
+    end
+  end
+  for _, id in ipairs(current or {}) do
+    id = tostring(id)
+    if not after[id] and not vim.tbl_contains(del, id) then
+      table.insert(del, id)
+    end
+  end
+  return { add_owner_ids = #add > 0 and add or nil, del_owner_ids = #del > 0 and del or nil }
+end
+
+--- A copy of `fields` fit for update: owner_ids (the wanted list) becomes add/del diffs
+--- against `current_owner_ids`. Pure; other fields pass through.
+function M.update_fields(fields, current_owner_ids)
+  if fields.owner_ids == nil then
+    return fields
+  end
+  local out = vim.deepcopy(fields)
+  out.owner_ids = nil
+  return vim.tbl_extend("force", out, M.owner_changes(current_owner_ids, fields.owner_ids))
+end
+
+--- Set the owners to `wanted`, given the owners now (`current`).
+function M.set_owners(ref, current, wanted, cb)
+  M.update(ref, M.update_fields({ owner_ids = wanted }, current), cb)
 end
 
 --- Add or remove you as an owner, keeping everyone else (items can have several owners).
@@ -354,7 +407,7 @@ function M.toggle_me(ref, current, add, cb)
     if add then
       table.insert(owners, me)
     end
-    M.set_owners(ref, owners, cb)
+    M.set_owners(ref, current, owners, cb)
   end)
 end
 

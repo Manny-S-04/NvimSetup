@@ -132,11 +132,45 @@ describe("sprints.api.items", function()
     await(function(cb) items.update(iref, { name = "N", points = 3, priority_id = "p1" }, cb) end)
     local posts = vim.tbl_filter(function(r) return r.method == "POST" end, requests)
     assert.are.same({ statusid = "s3" }, posts[1].opts.form)
-    assert.are.same({ users = { "u2", "u1" } }, posts[2].opts.form)
-    assert.are.same({ users = { "u2" } }, posts[3].opts.form)
+    assert.are.same({ newusers = { "u1" } }, posts[2].opts.form) -- only the diff, never `users`
+    assert.are.same({ delusers = { "u1" } }, posts[3].opts.form)
     assert.are.equal("/team/T/projects/P/sprints/S/item/9/notes/", posts[4].path)
     assert.are.equal("<div>a &lt;b&gt;</div><div>c</div>", posts[4].opts.form.name)
     assert.are.same({ name = "N", point = "3", projpriorityid = "p1" }, posts[5].opts.form)
+  end)
+
+  it("sends owner changes on update as newusers / delusers diffs", function()
+    stub(function()
+      return {}
+    end)
+    local iref = vim.tbl_extend("force", ref, { item = "9" })
+    await(function(cb) items.set_owners(iref, { "u1", "u2" }, { "u2", "u3" }, cb) end) -- swap u1 for u3
+    await(function(cb) items.set_owners(iref, { "u1", "u2" }, {}, cb) end) -- remove all
+    local before = #requests
+    assert.is_true(await(function(cb) items.set_owners(iref, { "u1" }, { "u1" }, cb) end))
+    assert.are.equal(before, #requests) -- no change: no request
+    local posts = vim.tbl_filter(function(r) return r.method == "POST" end, requests)
+    assert.are.same({ newusers = { "u3" }, delusers = { "u1" } }, posts[1].opts.form)
+    assert.are.same({ delusers = { "u1", "u2" } }, posts[2].opts.form)
+  end)
+
+  it("owner_changes / update_fields are pure diffs", function()
+    assert.are.same({}, items.owner_changes({ "u1" }, { "u1" }))
+    assert.are.same({ add_owner_ids = { "5" } }, items.owner_changes(nil, { 5, "5" }))
+    local fields = { name = "N", owner_ids = { "u2" } }
+    assert.are.same({ name = "N", add_owner_ids = { "u2" }, del_owner_ids = { "u1" } }, items.update_fields(fields, { "u1" }))
+    assert.are.same({ name = "N", owner_ids = { "u2" } }, fields) -- input untouched
+  end)
+
+  it("keeps users create-only and newusers / delusers update-only", function()
+    stub(function() error("no request expected") end)
+    local iref = vim.tbl_extend("force", ref, { item = "9" })
+    local ok, err = await(function(cb) items.update(iref, { owner_ids = { "u1" } }, cb) end)
+    assert.is_nil(ok)
+    assert.truthy(err.message:find("owner_ids can't be sent on update", 1, true))
+    local none, cerr = await(function(cb) items.create(ref, { name = "X", add_owner_ids = { "u1" } }, cb) end)
+    assert.is_nil(none)
+    assert.truthy(cerr.message:find("add_owner_ids can't be sent on create", 1, true))
   end)
 
   it("sends nothing for an empty update and rejects unknown fields", function()

@@ -351,7 +351,7 @@ function M.edit(item, on_saved)
             vim.notify("sprints.nvim: nothing changed")
             return done(true)
           end
-          items.update(ref, fields, function(ok, uerr)
+          items.update(ref, items.update_fields(fields, item.owner_ids), function(ok, uerr)
             if not ok then
               util.notify_error("save failed (your text is kept)", uerr)
               return done(false)

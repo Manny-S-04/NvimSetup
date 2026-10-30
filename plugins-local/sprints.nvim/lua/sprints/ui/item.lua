@@ -141,7 +141,7 @@ function M.pick_owner(bufnr)
       if adding then
         table.insert(owners, choice.id)
       end
-      items.set_owners(ref, owners,
+      items.set_owners(ref, current, owners,
         after(bufnr, ("%s: %s %s"):format(key_of(bufnr), adding and "added" or "removed", choice.name)))
     end)
   end)
@@ -153,7 +153,7 @@ function M.unassign_all(bufnr)
     return vim.notify("sprints.nvim: " .. key_of(bufnr) .. " has no owners")
   end
   if util.confirm(("Remove all owners (%s) from %s?"):format(item.assignee or "", key_of(bufnr))) then
-    items.set_owners(ref_of(bufnr), {}, after(bufnr, key_of(bufnr) .. ": removed all owners"))
+    items.set_owners(ref_of(bufnr), item.owner_ids, {}, after(bufnr, key_of(bufnr) .. ": removed all owners"))
   end
 end
 
