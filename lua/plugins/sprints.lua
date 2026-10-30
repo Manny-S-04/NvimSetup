@@ -13,7 +13,7 @@ return {
         { "<leader>sl", "<cmd>SprintsBacklog<cr>", desc = "Sprints: backlog" },
         { "<leader>sn", "<cmd>SprintsNew<cr>", desc = "Sprints: new item" },
         { "<leader>si", "<cmd>SprintsItem<cr>", desc = "Sprints: open the item under the cursor" },
-        { "<leader>ss", ":SprintsSearch ", desc = "Sprints: search titles" },
+        { "<leader>ss", ":SprintsSearch ", desc = "Sprints: search (title or number)" },
     },
     opts = {},
 }

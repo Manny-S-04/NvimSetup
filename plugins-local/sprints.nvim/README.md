@@ -64,11 +64,11 @@ that doesn't expire, and the plugin mints short-lived access tokens from it.
 | `:SprintsBoard` | `<leader>sb` | Active sprint grouped by status |
 | `:SprintsBacklog` | `<leader>sl` | The backlog |
 | `:SprintsNew` | `<leader>sn` | New item (`:w` creates) |
-| `:SprintsItem [NO]` | `<leader>si` | Open an item: `I12`, `12`, `#12`, `PRJ-I12`, default word under cursor |
-| `:SprintsSearch WORDS` | `<leader>ss` | Items whose title has every word (active sprint + backlog) |
+| `:SprintsItem [NO]` | `<leader>si` | Open an item: `CV-I12`, `I12`, `#12`, `12`, default word under cursor; searches every sprint |
+| `:SprintsSearch[!] WORDS` | `<leader>ss` | Zoho's search (title or number) in open sprints + backlog; `!` = every sprint |
 | `:SprintsSprint [pick]` | | Active sprint(s); `pick` chooses any (active first) |
 | `:SprintsProject` | | Switch project for the session |
-| `:SprintsRaw <what>` | | Raw API response: `teams projects project sprints statuses users`, `itemsearch <value> [itemid\|name]` |
+| `:SprintsRaw <what>` | | Raw API response: `teams projects project sprints statuses users`, `get <path> [k=v ...]` |
 | `:Sprints` | | Help |
 
 **List** — `<CR>` open · `n` new item here · `b` board view · `m` only mine · `yk`/`yu` copy key/link ·
@@ -107,8 +107,10 @@ bold, italics, code, links, lists, headings and code blocks survive the round tr
 - **No transitions.** Zoho statuses aren't gated by a workflow in the API, so `s` offers every
   project status except the current one.
 - **Items need four ids** (team, project, sprint, item), so buffers carry a `ref`, and
-  `:SprintsItem` uses the team-wide item search (`orgitemlogs`, any project/sprint), falling back
-  to scanning the active sprint(s) + backlog if that call fails or finds nothing.
+  there's no working project-wide lookup: `:SprintsItem` searches sprint by sprint (6 at a time:
+  the sprint it was last found in, then active, backlog, upcoming, completed newest first) and
+  remembers each item's sprint in `stdpath("cache")/sprints.nvim/item_sprints.json`. Numbers
+  are searched as digits (`CV-I22516` -> `22516`); the prefix is display only.
 - **"Mine" filters client-side.** The server-side owner filter needs board lane ids that differ per project.
 - **Assign to me replaces the owner list.** Zoho items can have several owners.
 - **Not ported yet:** the harpoon worklist and parent/children navigation (Zoho has epics and
