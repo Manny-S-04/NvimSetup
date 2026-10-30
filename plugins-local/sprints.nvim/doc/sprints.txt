@@ -47,14 +47,16 @@ COMMANDS                                                  *sprints-commands*
 :SprintsBoard            Active sprint(s) grouped by status.
 :SprintsBacklog          Items in the project backlog.
 :SprintsNew              New item; :w creates.
-:SprintsItem [NO]        Open an item (I12, 12, PRJ-I12; default: under cursor).
-:SprintsSearch {words}   Items whose title has every word.
+:SprintsItem [NO]        Open an item (CV-I12, I12, 12; default: under cursor).
+                         Searches every sprint, last-known sprint first.
+:SprintsSearch[!] {words} Zoho's search (title or number) in open sprints
+                         and the backlog; with ! in every sprint.
 :SprintsSprint [pick]    Items in the active sprint(s), or pick any sprint.
 :SprintsProject          Switch project for this session.
 :SprintsRefresh          Refresh the current item buffer.
 :SprintsRaw {what}       Raw API response (teams, projects, project,
-                         sprints, statuses, users, itemsearch {value}
-                         [itemid|name], get {path} [key=value ...] with
+                         sprints, statuses, users, get {path}
+                         [key=value ...] with
                          {team}/{project} filled in).
 :Sprints                 Help.
 
