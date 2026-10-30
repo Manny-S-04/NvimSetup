@@ -68,7 +68,7 @@ that doesn't expire, and the plugin mints short-lived access tokens from it.
 | `:SprintsSearch WORDS` | `<leader>ss` | Items whose title has every word (active sprint + backlog) |
 | `:SprintsSprint [pick]` | | Active sprint(s); `pick` chooses any (active first) |
 | `:SprintsProject` | | Switch project for the session |
-| `:SprintsRaw <what>` | | Raw API response: `teams projects project sprints statuses users` |
+| `:SprintsRaw <what>` | | Raw API response: `teams projects project sprints statuses users`, `itemsearch <value> [itemid\|name]` |
 | `:Sprints` | | Help |
 
 **List** — `<CR>` open · `n` new item here · `b` board view · `m` only mine · `yk`/`yu` copy key/link ·
@@ -107,7 +107,8 @@ bold, italics, code, links, lists, headings and code blocks survive the round tr
 - **No transitions.** Zoho statuses aren't gated by a workflow in the API, so `s` offers every
   project status except the current one.
 - **Items need four ids** (team, project, sprint, item), so buffers carry a `ref`, and
-  `:SprintsItem` scans the active sprint(s) + backlog: there's no get-by-number call.
+  `:SprintsItem` uses the team-wide item search (`orgitemlogs`, any project/sprint), falling back
+  to scanning the active sprint(s) + backlog if that call fails or finds nothing.
 - **"Mine" filters client-side.** The server-side owner filter needs board lane ids that differ per project.
 - **Assign to me replaces the owner list.** Zoho items can have several owners.
 - **Not ported yet:** the harpoon worklist and parent/children navigation (Zoho has epics and

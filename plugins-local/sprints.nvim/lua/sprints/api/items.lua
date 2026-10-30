@@ -52,7 +52,24 @@ M.ENDPOINTS = {
     points = "point",
   },
   created_id_keys = { "addedItemId", "itemId", "id" },
+  -- Team-wide item search (from a Zoho forum answer; path/value format UNVERIFIED, see
+  -- :SprintsRaw itemsearch). One call finds an item in any project/sprint.
+  search = {
+    path = "/team/%s/timesheet/",
+    action = "orgitemlogs",
+    headers = { ["X-ZA-REQSIZE"] = "large" },
+    range = 50,
+  },
 }
+
+-- Fields a search hit needs to become a ref. Candidates, as elsewhere, until a real response
+-- pins the names down.
+local SEARCH_F = {
+  project = { "projectId", "projId", "projectid", "project_id" },
+  sprint = { "sprintId", "sprintid", "sprint_id" },
+  item = { "itemId", "itemid", "item_id" },
+}
+M.SEARCH_FIELDS = SEARCH_F
 
 local function item_path(ref)
   return ("/team/%s/projects/%s/sprints/%s/item/"):format(ref.team, ref.project, ref.sprint)
@@ -148,6 +165,90 @@ function M.normalise(row, ref, meta, side)
     },
     raw = row,
   }
+end
+
+--- Raw team-wide search request. Exposed for :SprintsRaw itemsearch.
+---@param team string
+---@param by "itemid"|"name"
+---@param value string
+---@param cb fun(result: table|nil, err: table|nil)
+function M.search_raw(team, by, value, cb)
+  local e = M.ENDPOINTS.search
+  client.request("GET", e.path:format(team), {
+    query = { action = e.action, viewtype = 0, index = 1, range = e.range, searchby = by, searchvalue = value },
+    headers = e.headers,
+  }, cb)
+end
+
+--- Search response -> hits that can be opened. Pure. The resource prefix isn't known yet, so
+--- every <x>JObj in the body is tried, "item" first; a row counts only if it carries a project
+--- and sprint id (side tables like projectJObj don't).
+---@return { ref: table, key: string, name: string|nil, no: any, raw: table }[]
+function M.search_hits(body, team)
+  if type(body) ~= "table" then
+    return {}
+  end
+  local prefixes = { "item" }
+  for k in pairs(body) do
+    local p = type(k) == "string" and k:match("^(.-)[Jj][Oo]bj$")
+    if p and p ~= "" and p ~= "item" then
+      table.insert(prefixes, p)
+    end
+  end
+  table.sort(prefixes, function(a, b)
+    if a == "item" or b == "item" then
+      return a == "item" and b ~= "item"
+    end
+    return a < b
+  end)
+  for _, prefix in ipairs(prefixes) do
+    local out = {}
+    for _, row in ipairs(decode.rows(body, prefix)) do
+      local project, sprint = decode.pick(row, SEARCH_F.project), decode.pick(row, SEARCH_F.sprint)
+      if project and sprint then
+        local item = tostring(decode.pick(row, SEARCH_F.item) or row.id)
+        local no = decode.pick(row, F.no)
+        table.insert(out, {
+          ref = { team = team, project = tostring(project), sprint = tostring(sprint), item = item },
+          key = M.display_key(no, item),
+          no = no,
+          name = decode.pick(row, F.name),
+          raw = row,
+        })
+      end
+    end
+    if #out > 0 then
+      return out
+    end
+  end
+  return {}
+end
+
+---@param cb fun(hits: table[]|nil, err: table|nil)
+function M.search(team, by, value, cb)
+  M.search_raw(team, by, value, function(result, err)
+    if not result then
+      return cb(nil, err)
+    end
+    cb(M.search_hits(result.body, team), nil)
+  end)
+end
+
+--- Values to try as searchvalue for an item key, most specific first:
+--- "CV-I22516" -> { "CV-I22516", "I22516", "22516" }. Pure.
+function M.key_variants(wanted)
+  local out, seen = {}, {}
+  local function add(v)
+    if v and v ~= "" and not seen[v] then
+      seen[v] = true
+      table.insert(out, v)
+    end
+  end
+  local w = wanted:upper():gsub("^#", "")
+  add(w)
+  add(w:match("%-([^%-]+)$"))
+  add(w:match("(%d+)$"))
+  return out
 end
 
 --- Items in a sprint (or the backlog: pass its id as ref.sprint).

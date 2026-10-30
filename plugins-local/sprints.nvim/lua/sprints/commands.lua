@@ -258,8 +258,33 @@ function M.item_matches(it, wanted)
   return ends_with(key, w) or ends_with(no, w) or ends_with(w, key) or ends_with(w, no)
 end
 
---- :SprintsItem I123 — search the active sprint(s) and the backlog for that item number.
---- (Zoho has no "get item by number" call, so this is a scan.)
+--- Team-wide lookup of an item key: one search per key variant ("CV-I12", "I12", "12") until a
+--- hit matches. cb(hit) / cb(nil) when nothing matched / cb(nil, err) when search itself failed.
+function M.find_item(team, wanted, cb)
+  local items = api("items")
+  local variants = items.key_variants(wanted)
+  local function try(i)
+    if i > #variants then
+      return cb(nil, nil)
+    end
+    items.search(team, "itemid", variants[i], function(hits, err)
+      if not hits then
+        return cb(nil, err)
+      end
+      for _, h in ipairs(hits) do
+        if M.item_matches(h, wanted) then
+          return cb(h, nil)
+        end
+      end
+      try(i + 1)
+    end)
+  end
+  try(1)
+end
+
+--- :SprintsItem I123 — team-wide search (any project, any sprint), then the details call.
+--- If the search call fails or finds nothing, falls back to scanning the active sprint(s) and
+--- backlog, so a wrong guess about the search endpoint degrades instead of breaking.
 local function cmd_item(cmd_opts)
   local wanted = vim.trim(cmd_opts.args or "")
   if wanted == "" then
@@ -270,17 +295,26 @@ local function cmd_item(cmd_opts)
   end
   require("sprints.ui.context").project(function(team, project)
     vim.notify("sprints.nvim: looking for " .. wanted .. "…")
-    scan(team, project, function(list, err)
-      if not list then
-        return notify_error("could not search", err)
+    M.find_item(team, wanted, function(hit, serr)
+      if hit then
+        return require("sprints.ui.item").open_ref(hit.ref, hit.key)
       end
-      for _, it in ipairs(list) do
-        if M.item_matches(it, wanted) then
-          return require("sprints.ui.item").open_ref(it.ref, it.key)
+      if serr then
+        vim.notify("sprints.nvim: item search failed (" .. tostring(serr.message) .. "), scanning instead",
+          vim.log.levels.WARN)
+      end
+      scan(team, project, function(list, err)
+        if not list then
+          return notify_error("could not search", err)
         end
-      end
-      vim.notify(("sprints.nvim: %s not found in the active sprint(s) or backlog (try :SprintsSearch)"):format(wanted),
-        vim.log.levels.WARN)
+        for _, it in ipairs(list) do
+          if M.item_matches(it, wanted) then
+            return require("sprints.ui.item").open_ref(it.ref, it.key)
+          end
+        end
+        vim.notify(("sprints.nvim: %s not found (team search, then active sprint(s) + backlog)"):format(wanted),
+          vim.log.levels.WARN)
+      end)
     end)
   end)
 end
@@ -302,13 +336,21 @@ local RAW = {
   statuses = function(team, project, cb)
     api("client").request("GET", ("/team/%s/projects/%s/itemstatus/"):format(team, project), { query = { action = "data" } }, cb)
   end,
+  -- :SprintsRaw itemsearch <value> [itemid|name]
+  itemsearch = function(team, _, cb, args)
+    if not args[1] then
+      return cb(nil, { message = "usage: :SprintsRaw itemsearch <value> [itemid|name]" })
+    end
+    api("items").search_raw(team, args[2] or "itemid", args[1], cb)
+  end,
   users = function(team, project, cb)
     api("client").request("GET", ("/team/%s/projects/%s/users/"):format(team, project), { query = { action = "data", index = 1, range = 10 } }, cb)
   end,
 }
 
 local function cmd_raw(cmd_opts)
-  local what = vim.trim(cmd_opts.args or "")
+  local args = vim.split(vim.trim(cmd_opts.args or ""), "%s+", { trimempty = true })
+  local what = table.remove(args, 1) or ""
   local fn = RAW[what]
   if not fn then
     return vim.notify("sprints.nvim: usage :SprintsRaw " .. table.concat(vim.tbl_keys(RAW), "|"), vim.log.levels.WARN)
@@ -316,7 +358,7 @@ local function cmd_raw(cmd_opts)
   local function go(team, project)
     fn(team, project, function(result, err)
       require("sprints.ui.item").show_value("sprints://raw/" .. what, result and result.body or { error = err })
-    end)
+    end, args)
   end
   if what == "teams" then
     return go(nil, nil)
@@ -338,7 +380,7 @@ local function cmd_help()
     "  :SprintsItem [NO]       Open an item by number (defaults to the word under the cursor)",
     "  :SprintsProject         Switch project for this session",
     "  :SprintsRefresh         Refresh the current item buffer",
-    "  :SprintsRaw <what>      Raw API response (teams|projects|project|sprints|statuses|users)",
+    "  :SprintsRaw <what>      Raw API response (teams|projects|project|sprints|statuses|users|itemsearch V)",
     "",
     "In a list or an item, g? shows its keys.",
     "",
@@ -378,7 +420,7 @@ local COMMANDS = {
     require("sprints.ui.item").refresh(vim.api.nvim_get_current_buf())
   end, { nargs = 0, desc = "Refresh the current item buffer" } },
   { "SprintsRaw", cmd_raw, {
-    nargs = 1,
+    nargs = "+",
     complete = function()
       return vim.tbl_keys(RAW)
     end,
