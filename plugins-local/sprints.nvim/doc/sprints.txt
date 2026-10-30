@@ -54,7 +54,8 @@ COMMANDS                                                  *sprints-commands*
 :SprintsRefresh          Refresh the current item buffer.
 :SprintsRaw {what}       Raw API response (teams, projects, project,
                          sprints, statuses, users, itemsearch {value}
-                         [itemid|name]).
+                         [itemid|name], get {path} [key=value ...] with
+                         {team}/{project} filled in).
 :Sprints                 Help.
 
 List buffer: <CR> open, n new, b board, m only mine, yk/yu copy key/link,

@@ -336,6 +336,24 @@ local RAW = {
   statuses = function(team, project, cb)
     api("client").request("GET", ("/team/%s/projects/%s/itemstatus/"):format(team, project), { query = { action = "data" } }, cb)
   end,
+  -- :SprintsRaw get <path> [key=value ...] — any GET; {team} and {project} are filled in.
+  -- e.g. :SprintsRaw get /team/{team}/projects/{project}/item/ action=itemcountandepoint searchby=both searchvalue=22516
+  get = function(team, project, cb, args)
+    local path = table.remove(args, 1)
+    if not path then
+      return cb(nil, { message = "usage: :SprintsRaw get <path> [key=value ...]" })
+    end
+    path = path:gsub("{team}", team or ""):gsub("{project}", project or "")
+    local query = {}
+    for _, kv in ipairs(args) do
+      local k, v = kv:match("^([^=]+)=(.*)$")
+      if not k then
+        return cb(nil, { message = "expected key=value, got " .. kv })
+      end
+      query[k] = v
+    end
+    api("client").request("GET", path, { query = query, headers = { ["X-ZA-REQSIZE"] = "large" } }, cb)
+  end,
   -- :SprintsRaw itemsearch <value> [itemid|name]
   itemsearch = function(team, _, cb, args)
     if not args[1] then
@@ -380,7 +398,7 @@ local function cmd_help()
     "  :SprintsItem [NO]       Open an item by number (defaults to the word under the cursor)",
     "  :SprintsProject         Switch project for this session",
     "  :SprintsRefresh         Refresh the current item buffer",
-    "  :SprintsRaw <what>      Raw API response (teams|projects|project|sprints|statuses|users|itemsearch V)",
+    "  :SprintsRaw <what>      Raw API response (teams|projects|project|sprints|statuses|users|get PATH k=v…)",
     "",
     "In a list or an item, g? shows its keys.",
     "",
