@@ -10,6 +10,7 @@ local workspace = require("sprints.api.workspace")
 local M = {}
 
 local last_item = {} -- bufnr -> item last rendered
+local last_marks = {} -- bufnr -> render marks (comment line ranges)
 
 local function buf_name(key)
   return "sprints://" .. key
@@ -41,7 +42,8 @@ local function key_of(bufnr)
 end
 
 local function render_into(bufnr, item)
-  local lines, highlights = render.render(item)
+  local lines, highlights, marks = render.render(item)
+  last_marks[bufnr] = marks
   util.set_lines(bufnr, lines)
   util.apply_highlights(bufnr, highlights)
   vim.b[bufnr].sprints_ref = item.ref
@@ -111,12 +113,88 @@ function M.change_status(bufnr)
         return s.name
       end,
     }, function(choice)
-      if choice then
-        items.set_status(ref, choice.id,
-          after(bufnr, ("%s: %s → %s"):format(key_of(bufnr), item.status or "?", choice.name)))
+      if not choice then
+        return
+      end
+      local what = ("%s: %s → %s"):format(key_of(bufnr), item.status or "?", choice.name)
+      -- mandatory custom fields still empty: ask for them and send them with the change,
+      -- since Zoho refuses the status change without them
+      local missing = require("sprints.api.fields").missing(item, item.field_defs or {})
+      if #missing == 0 then
+        return items.set_status(ref, choice.id, after(bufnr, what))
+      end
+      require("sprints.ui.fields").ask_all(missing, ref, function(udf)
+        if not udf then
+          return vim.notify("sprints.nvim: status change cancelled", vim.log.levels.WARN)
+        end
+        items.set_status(ref, choice.id, after(bufnr, what), udf)
+      end)
+    end)
+  end)
+end
+
+--- Set one of the project's custom fields.
+function M.set_field(bufnr)
+  local ref, item = ref_of(bufnr), last_item[bufnr] or {}
+  local list = item.custom_fields or {}
+  if #list == 0 then
+    return vim.notify("sprints.nvim: " .. (item.fields_error or "this project has no custom fields"),
+      vim.log.levels.WARN)
+  end
+  vim.ui.select(list, {
+    prompt = key_of(bufnr) .. " field",
+    format_item = function(v)
+      return ("%s: %s"):format(v.field.name, v.text or (v.field.mandatory and "(empty, required)" or "—"))
+    end,
+  }, function(v)
+    if not v then
+      return
+    end
+    require("sprints.ui.fields").ask(v.field, ref, function(value, label)
+      if value ~= nil then
+        items.update(ref, { [v.field.udf] = value },
+          after(bufnr, ("%s: %s → %s"):format(key_of(bufnr), v.field.name, label or tostring(value))))
       end
     end)
   end)
+end
+
+--- The comment under the cursor, or nil (with a message).
+local function comment_under_cursor(bufnr)
+  local item = last_item[bufnr] or {}
+  local i = render.comment_at(last_marks[bufnr], vim.api.nvim_win_get_cursor(0)[1] - 1)
+  local c = i and item.comments and item.comments[i]
+  if not c then
+    vim.notify("sprints.nvim: put the cursor on a comment first", vim.log.levels.WARN)
+  end
+  return c
+end
+
+function M.edit_comment(bufnr)
+  local c = comment_under_cursor(bufnr)
+  if not c then
+    return
+  end
+  if not c.can_edit then
+    return vim.notify("sprints.nvim: Zoho says you can't edit that comment", vim.log.levels.WARN)
+  end
+  require("sprints.ui.comment").open(ref_of(bufnr), key_of(bufnr), function()
+    M.refresh(bufnr)
+  end, { note_id = c.id, lines = require("sprints.html").to_lines(c.body) })
+end
+
+function M.delete_comment(bufnr)
+  local c = comment_under_cursor(bufnr)
+  if not c then
+    return
+  end
+  if not c.can_delete then
+    return vim.notify("sprints.nvim: Zoho says you can't delete that comment", vim.log.levels.WARN)
+  end
+  local first = (require("sprints.html").to_lines(c.body)[1] or ""):sub(1, 50)
+  if util.confirm(("Delete %s's comment on %s (%s…)?"):format(c.author, key_of(bufnr), first)) then
+    items.delete_comment(ref_of(bufnr), c.id, after(bufnr, key_of(bufnr) .. ": comment deleted"))
+  end
 end
 
 --- Add yourself as an owner, or remove yourself if you already are one. Others are kept.
@@ -299,6 +377,9 @@ local ACTIONS = {
   { "status", M.change_status, "change status" },
   { "edit", M.edit, "edit title, description, fields (:w saves)" },
   { "comment", M.comment, "add a comment (:w posts)" },
+  { "comment_edit", M.edit_comment, "edit the comment under the cursor (:w saves)" },
+  { "comment_delete", M.delete_comment, "delete the comment under the cursor (asks first)" },
+  { "field", M.set_field, "set a custom field" },
   { "assign_me", M.toggle_me, "add / remove yourself as owner" },
   { "owners", M.pick_owner, "add / remove an owner" },
   { "unassign", M.unassign_all, "remove all owners (asks first)" },
@@ -352,6 +433,7 @@ local function prepare(bufnr)
     once = true,
     callback = function()
       last_item[bufnr] = nil
+      last_marks[bufnr] = nil
     end,
   })
 end

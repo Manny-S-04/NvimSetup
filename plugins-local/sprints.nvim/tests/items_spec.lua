@@ -1,5 +1,6 @@
 local client = require("sprints.api.client")
 local config = require("sprints.config")
+local fields = require("sprints.api.fields")
 local items = require("sprints.api.items")
 local workspace = require("sprints.api.workspace")
 
@@ -23,6 +24,22 @@ local META = {
     userJObj = { u1 = { "Manny", "manny@example.com" }, u2 = { "Sam", "sam@example.com" } },
     user_prop = { userName = 0, email = 1 },
   },
+  ["/settings/customization/modules/"] = {
+    custommodule_prop = { moduleName = 0, entityType = 1 },
+    custommoduleJObj = { M0 = { "sprint", 2 }, M1 = { "item", 3 } },
+  },
+  ["/customization/modules/M1/fields/"] = {
+    customfield_prop = { fieldName = 0, fieldType = 3, udfName = 6, optionGroups = 11 },
+    customfieldJObj = {
+      f1 = { "AI Assisted", "", false, 7, false, false, "UDF_PKL1", 0, 2, {}, 0, { { "", { ["101"] = { "Yes" }, ["102"] = { "No" } } } } },
+      f2 = { "Notes", "", false, 1, false, false, "UDF_CHAR1", 0, 2, {}, 0, {} },
+      f3 = { "Status", "", true, 7, false, false, "STATUS_ID", 0, 2, {}, 0, {} },
+    },
+  },
+  ["/projects/P/modules/M1/"] = {
+    customfield_prop = { sequence = 0, isMandatory = 3 },
+    sectionVSfields = { sec = { fieldJObj = { f1 = { 2, "", "", true }, f2 = { 1, "", "", false }, f3 = { 0, "", "", true } } } },
+  },
 }
 
 local function item_page(rows, start)
@@ -42,6 +59,7 @@ describe("sprints.api.items", function()
   before_each(function()
     config.setup({ dc = "eu", client_id = "i", client_secret = "s", refresh_token = "r", email = "MANNY@example.com", page_size = 2 })
     workspace.clear_cache()
+    fields.clear_cache()
     original_request = client.request
     requests = {}
   end)
@@ -106,12 +124,27 @@ describe("sprints.api.items", function()
         if not comments_ok then
           return nil, { message = "nope" }
         end
-        return { notesJObj = { n1 = { "<div>hi</div>", "u2", "1700000000000" } }, notes_prop = { notes = 0, createdBy = 1, createdTime = 2 } }
+        assert.are.equal("/team/T/projects/P/modules/M1/entity/9/notes/", path)
+        return {
+          notesJObj = { n1 = { "n1", "<div>hi</div>", "u2", "2026-11-05T10:00:00Z" } },
+          notes_prop = { noteId = 0, notes = 1, createdBy = 2, createdOn = 3 },
+          permissionJObj = { n1 = { false, true } },
+          permission_prop = { hasEditPermission = 0, hasDeletePermission = 1 },
+        }
       end
-      return item_page({ { "A", "I9", "s1", { "u1" } } }, 9)
+      local body = item_page({ { "A", "I9", "s1", { "u1" }, "t1", "p1", "101" } }, 9)
+      body.item_prop.UDF_PKL1 = 6
+      return body
     end)
     local item = await(function(cb) items.get(vim.tbl_extend("force", ref, { item = "9" }), cb) end)
     assert.are.equal("A", item.summary)
+    assert.is_false(item.comments[1].can_edit)
+    assert.is_true(item.comments[1].can_delete)
+    -- custom fields: the project's UDF fields in layout order, option ids shown as titles
+    assert.are.same({ "Notes", "AI Assisted" }, vim.tbl_map(function(v) return v.field.name end, item.custom_fields))
+    assert.is_nil(item.custom_fields[1].text)
+    assert.are.equal("Yes", item.custom_fields[2].text)
+    assert.is_true(item.custom_fields[2].field.mandatory)
     assert.are.equal("Sam", item.comments[1].author)
     assert.are.equal("<div>hi</div>", item.comments[1].body)
 
@@ -134,7 +167,8 @@ describe("sprints.api.items", function()
     assert.are.same({ statusid = "s3" }, posts[1].opts.form)
     assert.are.same({ newusers = { "u1" } }, posts[2].opts.form) -- only the diff, never `users`
     assert.are.same({ delusers = { "u1" } }, posts[3].opts.form)
-    assert.are.equal("/team/T/projects/P/sprints/S/item/9/notes/", posts[4].path)
+    assert.are.equal("/team/T/projects/P/modules/M1/entity/9/notes/", posts[4].path)
+    assert.are.equal("addnotes", posts[4].opts.form.action)
     assert.are.equal("<div>a &lt;b&gt;</div><div>c</div>", posts[4].opts.form.name)
     assert.are.same({ name = "N", point = "3", projpriorityid = "p1" }, posts[5].opts.form)
   end)
@@ -194,6 +228,63 @@ describe("sprints.api.items", function()
     local none, err = await(function(cb) items.create(ref, { name = " " }, cb) end)
     assert.is_nil(none)
     assert.are.equal("an item needs a title", err.message)
+  end)
+
+  it("edits and deletes comments by note id", function()
+    stub(function()
+      return {}
+    end)
+    local iref = vim.tbl_extend("force", ref, { item = "9" })
+    assert.is_true(await(function(cb) items.edit_comment(iref, "n1", "new", cb) end))
+    assert.is_true(await(function(cb) items.delete_comment(iref, "n1", cb) end))
+    local calls = vim.tbl_filter(function(r) return r.path:find("/notes/") end, requests)
+    assert.are.equal("POST", calls[1].method)
+    assert.are.equal("/team/T/projects/P/modules/M1/entity/9/notes/n1/", calls[1].path)
+    assert.are.same({ action = "updatenotes", name = "<div>new</div>" }, calls[1].opts.form)
+    assert.are.equal("DELETE", calls[2].method)
+    assert.are.equal("/team/T/projects/P/modules/M1/entity/9/notes/n1/", calls[2].path)
+  end)
+
+  it("sends mandatory field values with a status change", function()
+    stub(function()
+      return {}
+    end)
+    local iref = vim.tbl_extend("force", ref, { item = "9" })
+    await(function(cb) items.set_status(iref, "s3", cb, { UDF_PKL1 = "o1" }) end)
+    local post = vim.tbl_filter(function(r) return r.method == "POST" end, requests)[1]
+    assert.are.same({ statusid = "s3", UDF_PKL1 = "o1", chkdependent = "true" }, post.opts.form)
+  end)
+
+  it("uses item_module_id from setup without asking for the modules list", function()
+    config.setup({ dc = "eu", client_id = "i", client_secret = "s", refresh_token = "r", item_module_id = "MX" })
+    stub(function()
+      return {}
+    end)
+    await(function(cb) items.add_comment(vim.tbl_extend("force", ref, { item = "9" }), "x", cb) end)
+    assert.are.equal(1, #requests)
+    assert.are.equal("/team/T/projects/P/modules/MX/entity/9/notes/", requests[1].path)
+  end)
+
+  it("still opens the item when custom fields can't load", function()
+    stub(function(_, path)
+      if path:find("/notes/$") then
+        return {}
+      end
+      return item_page({ { "A", "I9", "s1", {} } }, 9)
+    end)
+    local saved = META["/projects/P/modules/M1/"]
+    META["/projects/P/modules/M1/"] = nil
+    local orig = client.request
+    client.request = function(method, path, opts, cb)
+      if path == "/team/T/projects/P/modules/M1/" then
+        return vim.schedule(function() cb(nil, { message = "scope" }) end)
+      end
+      orig(method, path, opts, cb)
+    end
+    local item = await(function(cb) items.get(vim.tbl_extend("force", ref, { item = "9" }), cb) end)
+    META["/projects/P/modules/M1/"] = saved
+    assert.are.equal("A", item.summary)
+    assert.are.equal("scope", item.fields_error)
   end)
 
   it("rejects empty comments without a request", function()

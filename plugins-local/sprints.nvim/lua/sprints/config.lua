@@ -48,6 +48,9 @@ local defaults = {
   --   { bugs = { scope = "open", status = "open", type_id = "4669..." } }
   -- (fields: see sprints.api.query). Presets saved from the :SprintsFind menu are merged on top.
   presets = {},
+  -- id of the item module (comments and custom fields hang off it); found from the modules
+  -- list (needs the ZohoSprints.settings.READ scope) unless set here
+  item_module_id = nil,
   -- How item/list buffers are opened: "split", "vsplit", "tabnew" or "edit".
   open_cmd = "split",
   keymaps = {
@@ -57,6 +60,9 @@ local defaults = {
       status = "s",
       edit = "e",
       comment = "c",
+      comment_edit = "C",
+      comment_delete = "dc",
+      field = "F",
       assign_me = "a",
       owners = "o",
       unassign = "A",

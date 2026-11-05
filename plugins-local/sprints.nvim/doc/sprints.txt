@@ -74,7 +74,8 @@ COMMANDS                                                  *sprints-commands*
 
 List buffer: <CR> open, n new, b board, m only mine, yk/yu copy key/link,
 gx browser, W list = worklist, + add to worklist, r refresh, g? help.
-Item buffer: s status, e edit (:w saves), c comment (:w posts), a add/remove
+Item buffer: s status, e edit (:w saves), c comment (:w posts), C / dc edit /
+delete the comment under the cursor, F set a custom field, a add/remove
 me, o add/remove owner, A remove all owners, p priority, yk/yu copy key/link,
 gx browser, gp parent, gc sub items, W worklist = parent's items, + add to
 worklist, gR raw response, r refresh, g? help.

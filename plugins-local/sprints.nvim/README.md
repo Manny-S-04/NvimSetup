@@ -38,8 +38,11 @@ that doesn't expire, and the plugin mints short-lived access tokens from it.
 3. **Generate Code** with these scopes (10-minute expiry is fine):
 
    ```
-   ZohoSprints.teams.READ,ZohoSprints.projects.READ,ZohoSprints.sprints.READ,ZohoSprints.items.ALL,ZohoSprints.comments.ALL,ZohoSprints.teamusers.READ,ZohoSprints.projectusers.READ
+   ZohoSprints.teams.READ,ZohoSprints.projects.READ,ZohoSprints.sprints.READ,ZohoSprints.items.ALL,ZohoSprints.comments.ALL,ZohoSprints.teamusers.READ,ZohoSprints.projectusers.READ,ZohoSprints.settings.READ
    ```
+   `settings.READ` finds the item module (comments and custom fields hang off it) and the
+   custom field definitions. Without it, set `item_module_id` in setup; custom fields then
+   won't load (the item still opens).
 4. Exchange the code for a refresh token (within 10 minutes):
 
    ```sh
@@ -84,7 +87,8 @@ that doesn't expire, and the plugin mints short-lived access tokens from it.
 **List** — `<CR>` open · `n` new item here · `b` board view · `m` only mine · `yk`/`yu` copy key/link ·
 `gx` browser · `W` this list = worklist · `+` add to worklist · `r` refresh · `g?` help
 
-**Item** — `s` status · `e` edit everything (`:w` saves) · `c` comment (`:w` posts) · `a` add/remove me ·
+**Item** — `s` status · `e` edit everything (`:w` saves) · `c` comment (`:w` posts) · `C` / `dc` edit / delete the comment under the cursor ·
+`F` set a custom field · `a` add/remove me ·
 `o` add/remove an owner · `A` remove all owners (asks) · `p` priority · `yk`/`yu` copy key/link · `gx` browser ·
 `gp` parent · `gc` sub items · `W` worklist = parent's items · `+` add to worklist · `gR` raw response ·
 `r` refresh · `g?` help
@@ -137,17 +141,21 @@ bold, italics, code, links, lists, headings and code blocks survive the round tr
 - **Parent / children are sub items.** A row carries `parentItem`; there's no "children of"
   endpoint, so sub items are the parent's sprint's rows (listed with `subitem=true`) whose
   parent it is. The parent is fetched in the child's sprint, then the backlog.
-- **Still needs the browser:** moving an item between sprints, editing or deleting comments,
-  logging time, attachments. Each needs an endpoint that isn't confirmed yet.
+- **Custom fields** (the project layout's `UDF_*` fields) show under the item's fields, with
+  empty mandatory ones marked `(empty, required)`. `s` asks for those before changing status
+  and sends them with it (`chkdependent=true`), since Zoho refuses the change without them.
+- **Still needs the browser:** moving an item between sprints, logging time, attachments.
 
 ## Status of the API mapping
 
-Zoho's API reference is a JavaScript app, so parts of this were built from working
-third-party clients rather than the reference itself. The guesses are isolated so each is a
-one-line fix:
+Zoho's API reference (sprints.zoho.com/apidoc.html) is a JavaScript app; its data is in
+`static.zohocdn.com/sprints/zsweb/js/apiDocument.<hash>.js`. Confirmed from it: comments
+(`modules/{item module}/entity/{item}/notes/`, `action=addnotes|updatenotes`, DELETE), update's
+params (`statusid`, `chkdependent`, `newusers`/`delusers`, `UDF_*`), item fields
+(`parentItem`, list rows' `immediateParentId`), the modules / custom field / `formfields`
+endpoints. Still guesses, isolated so each is a one-line fix:
 
-- `items.ENDPOINTS`: the comments (`/notes/`) path and field (**unverified**); update-item field
-  names, assumed to match create's (confirmed) plus `statusid` (**unverified**).
+- `fields.options`: the nesting of a field's `optionGroups` (the reference's examples are empty).
 - `items.FIELDS`: candidate field names per attribute; the first one present wins.
 - `sprints.SPRINT_TYPES`: which `sprintType` code means "active". **Unverified.**
 - `hierarchy`: that sub items sit in their parent's sprint, and that item details answer for

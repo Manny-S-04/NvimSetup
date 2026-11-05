@@ -49,8 +49,10 @@ function M.format_date(v, with_time)
   return s:match("^(%d%d%d%d%-%d%d%-%d%d)") or s
 end
 
+--- item -> lines, highlights, marks. marks.comments = { { first, last, index } } (0-based
+--- line range of each comment, for acting on the one under the cursor).
 function M.render(item)
-  local lines, highlights = {}, {}
+  local lines, highlights, marks = {}, {}, { comments = {} }
   local function add(line)
     table.insert(lines, line)
     return #lines - 1
@@ -83,6 +85,18 @@ function M.render(item)
     end
   end
 
+  for _, v in ipairs(item.custom_fields or {}) do
+    local text = v.text or (v.field.mandatory and "(empty, required)") or nil
+    if text then
+      local label = v.field.name .. ":"
+      local idx = add(label .. string.rep(" ", math.max(1, 14 - #label)) .. text)
+      hl(idx, 0, #label, "sprintsLabel")
+    end
+  end
+  if item.fields_error then
+    add("(custom fields unavailable: " .. item.fields_error .. ")")
+  end
+
   add("")
   local dh = "## Description"
   hl(add(dh), 0, #dh, "sprintsHeading")
@@ -108,17 +122,30 @@ function M.render(item)
   else
     for i, c in ipairs(item.comments) do
       local author = c.author or "Unknown"
-      hl(add(author .. " — " .. M.format_date(c.created, true)), 0, #author, "sprintsCommentAuthor")
+      local edited = c.updated and c.updated ~= c.created and " (edited)" or ""
+      local first = add(author .. " — " .. M.format_date(c.created, true) .. edited .. (c.reply_to and " ↳ reply" or ""))
+      hl(first, 0, #author, "sprintsCommentAuthor")
       for _, l in ipairs(html.to_lines(c.body)) do
         add(l)
       end
+      table.insert(marks.comments, { first = first, last = #lines - 1, index = i })
       if i < n then
         add("")
       end
     end
   end
 
-  return lines, highlights
+  return lines, highlights, marks
+end
+
+--- The comment (index into item.comments) whose lines hold 0-based line `lnum`. Pure.
+function M.comment_at(marks, lnum)
+  for _, m in ipairs((marks or {}).comments or {}) do
+    if lnum >= m.first and lnum <= m.last then
+      return m.index
+    end
+  end
+  return nil
 end
 
 local function width(s)
