@@ -46,7 +46,7 @@ LSP client directly and merges the results of every attached server.
                                                        *mini_complete.setup()*
 With lazy.nvim: >lua
     {
-      '<your-github-user>/mini_complete.nvim',
+      'Manny-S-04/mini_complete.nvim',
       event = 'InsertEnter',
       opts = {},
     }

@@ -64,7 +64,7 @@ old copy: open a new one. Check from Neovim with `:echo $JIRA_URL`.
                                                               *jira.setup()*
 With lazy.nvim, loading on the commands: >lua
     {
-      '<your-github-user>/jira.nvim',
+      'Manny-S-04/jira.nvim',
       cmd = { 'Jira', 'JiraMine', 'JiraIssue', 'JiraSearch', 'JiraFind', 'JiraBoard',
               'JiraRefresh' },
       opts = { board = 19 },

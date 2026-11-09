@@ -41,7 +41,7 @@ Full reference inside Neovim: `:help jira`.
 
 ```lua
 {
-  "<your-github-user>/jira.nvim",
+  "Manny-S-04/jira.nvim",
   cmd = { "Jira", "JiraMine", "JiraIssue", "JiraSearch", "JiraFind", "JiraBoard", "JiraRefresh" },
   opts = {},
 }

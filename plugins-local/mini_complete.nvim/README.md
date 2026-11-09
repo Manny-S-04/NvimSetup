@@ -40,7 +40,7 @@ Full reference inside Neovim: `:help mini_complete`.
 
 ```lua
 {
-  "<your-github-user>/mini_complete.nvim",
+  "Manny-S-04/mini_complete.nvim",
   event = "InsertEnter",
   opts = {},
 }
