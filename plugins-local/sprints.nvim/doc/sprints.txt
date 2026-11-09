@@ -47,20 +47,44 @@ COMMANDS                                                  *sprints-commands*
 :SprintsBoard            Active sprint(s) grouped by status.
 :SprintsBacklog          Items in the project backlog.
 :SprintsNew              New item; :w creates.
-:SprintsItem [NO]        Open an item (I12, 12, PRJ-I12; default: under cursor).
-:SprintsSearch {words}   Items whose title has every word.
+:SprintsItem [NO]        Open an item (CV-I12, I12, 12; default: under cursor).
+                         Searches every sprint, last-known sprint first.
+:SprintsSearch[!] {words} Zoho's search (title or number) in open sprints
+                         and the backlog; with ! in every sprint. No words:
+                         |:SprintsFind|.
+:SprintsFind [PRESET]    Build a query from menus (where, owner, status,
+                         type, priority, text, created by me), or run a
+                         saved preset. "★ Save as preset" stores the query.
 :SprintsSprint [pick]    Items in the active sprint(s), or pick any sprint.
 :SprintsProject          Switch project for this session.
 :SprintsRefresh          Refresh the current item buffer.
+:SprintsParent [KEY]     Open KEY's parent.
+:SprintsChildren [KEY]   List KEY's sub items.
+:SprintsWork [KEY]       Worklist = KEY's parent's sub items (KEY's own if
+                         it has no parent). Needs harpoon (harpoon2).
+:SprintsWorklist [sub]   Open the worklist (harpoon menu); refresh | add |
+                         next | prev.
+                         KEY defaults to the item buffer you're in, the list
+                         row under the cursor, or the number under it.
 :SprintsRaw {what}       Raw API response (teams, projects, project,
-                         sprints, statuses, users).
+                         sprints, statuses, users, get {path}
+                         [key=value ...] with
+                         {team}/{project} filled in).
 :Sprints                 Help.
 
 List buffer: <CR> open, n new, b board, m only mine, yk/yu copy key/link,
-gx browser, r refresh, g? help.
-Item buffer: s status, e edit (:w saves), c comment (:w posts), a add/remove
+gx browser, W list = worklist, + add to worklist, r refresh, g? help.
+Item buffer: s status, e edit (:w saves), c comment (:w posts), C / dc edit /
+delete the comment under the cursor, F set a custom field, a add/remove
 me, o add/remove owner, A remove all owners, p priority, yk/yu copy key/link,
-gx browser, gR raw response, r refresh, g? help.
+gx browser, gp parent, gc sub items, W worklist = parent's items, + add to
+worklist, gR raw response, r refresh, g? help.
+
+Item buffers are named by key, sprints://I22516 (like jira.nvim's
+jira://CV-1), so harpoon, |:b| and |:e| find them. A buffer opened from the
+name alone (harpoon after the buffer was closed, :e, a session) loads the
+item; so does sprints:/I22516, the name with its slashes collapsed. When
+lazy-loading, add `event = "BufReadCmd sprints:/*"` to the spec.
 
 ==============================================================================
 EDITING                                                     *sprints-edit*

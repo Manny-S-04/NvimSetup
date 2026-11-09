@@ -98,6 +98,24 @@ describe("sprints.api.auth + client.request", function()
     assert.are.equal(2, api_calls)
   end)
 
+  it("passes caller headers through but never lets them replace Authorization", function()
+    local seen
+    stub({
+      ["/oauth/v2/token"] = function()
+        return { status = 200, body = { access_token = "TOK", expires_in = 3600 } }
+      end,
+      ["/zsapi/teams/"] = function(opts)
+        seen = opts.headers
+        return { status = 200, body = {} }
+      end,
+    })
+    await(function(cb)
+      client.request("GET", "/teams/", { headers = { ["X-ZA-REQSIZE"] = "large", Authorization = "evil" } }, cb)
+    end)
+    assert.are.equal("large", seen["X-ZA-REQSIZE"])
+    assert.are.equal("Zoho-oauthtoken TOK", seen.Authorization)
+  end)
+
   it("fails fast without credentials", function()
     config.setup({ client_id = "", client_secret = "", refresh_token = "" })
     stub({})

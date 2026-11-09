@@ -75,16 +75,6 @@ describe("sprints.sort", function()
   end)
 end)
 
-describe("search", function()
-  it("matches every word in title or key", function()
-    local c = require("sprints.commands")
-    local it_ = { key = "I2", summary = "Audit list endpoint timing out" }
-    assert.is_true(c.item_contains(it_, "audit TIMING"))
-    assert.is_true(c.item_contains(it_, "i2"))
-    assert.is_false(c.item_contains(it_, "audit pharmacy"))
-  end)
-end)
-
 describe("auth.lifetime_seconds", function()
   local auth = require("sprints.api.auth")
   it("handles seconds, legacy milliseconds and expires_in_sec", function()

@@ -44,6 +44,13 @@ local defaults = {
   -- Web link for an item. Placeholders: {dc} {team} {project} {sprint} {item} {no}.
   -- Check it against the address bar when you open an item in the browser and adjust.
   item_url = "https://sprints.zoho.{dc}/team/{team}#itemdetails/P{project}/I{item}",
+  -- Named queries for :SprintsFind <name>, e.g.
+  --   { bugs = { scope = "open", status = "open", type_id = "4669..." } }
+  -- (fields: see sprints.api.query). Presets saved from the :SprintsFind menu are merged on top.
+  presets = {},
+  -- id of the item module (comments and custom fields hang off it); found from the modules
+  -- list (needs the ZohoSprints.settings.READ scope) unless set here
+  item_module_id = nil,
   -- How item/list buffers are opened: "split", "vsplit", "tabnew" or "edit".
   open_cmd = "split",
   keymaps = {
@@ -53,6 +60,9 @@ local defaults = {
       status = "s",
       edit = "e",
       comment = "c",
+      comment_edit = "C",
+      comment_delete = "dc",
+      field = "F",
       assign_me = "a",
       owners = "o",
       unassign = "A",
@@ -60,6 +70,10 @@ local defaults = {
       yank_key = "yk",
       yank_url = "yu",
       browser = "gx",
+      parent = "gp",
+      children = "gc",
+      work = "W",
+      worklist_add = "+",
       raw = "gR",
       help = "g?",
     },
@@ -72,6 +86,8 @@ local defaults = {
       yank_url = "yu",
       browser = "gx",
       refresh = "r",
+      worklist = "W",
+      worklist_add = "+",
       close = "q",
       help = "g?",
     },

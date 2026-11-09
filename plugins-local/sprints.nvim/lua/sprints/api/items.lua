@@ -5,9 +5,12 @@
 --
 -- CONFIRMED paths (seen in working third-party clients): list items, item details, create,
 -- and create's form fields (name, description, projitemtypeid, projpriorityid, users, point).
--- UNVERIFIED (best guesses, isolated here so they're one-line fixes): the comment ("notes")
--- endpoints, and that update takes the same field names as create (plus statusid). Field names are matched against several
--- candidates for the same reason; :SprintsRaw / gR show the real payload.
+-- Update takes create's fields + statusid, except owners: newusers=[...] / delusers=[...].
+-- CONFIRMED from Zoho's API reference: update's params (create's + statusid, chkdependent,
+-- newusers/delusers JSON arrays, UDF_* columns), item_prop's names (parentItem, UDF_*), and
+-- comments ("notes"): /team/T/projects/P/modules/{item module}/entity/{item}/notes/[{note}/]
+-- (GET action=data, POST action=addnotes|updatenotes name=<html>, DELETE). Field names are still
+-- matched against several candidates (list and details differ); :SprintsRaw / gR show the payload.
 local async = require("sprints.api.async")
 local client = require("sprints.api.client")
 local config = require("sprints.config")
@@ -28,7 +31,8 @@ local F = {
   updated = { "lastModifiedTime", "lastUpdatedTime", "modifiedTime", "lastModifiedTimeLong" },
   description = { "description", "itemDescription", "desc" },
   epic = { "epicId", "epicid" },
-  parent = { "parentItemId", "parentId" },
+  parent = { "immediateParentId", "parentItem", "parentItemId", "parentId" }, -- list rows: immediate; details: parentItem
+  is_parent = { "isParent" },
   sprint = { "sprintId", "sprintid" },
   points = { "point", "points", "storyPoints", "estimationPoint" },
 }
@@ -38,8 +42,9 @@ M.FIELDS = F
 M.ENDPOINTS = {
   list_action = "sprintitems",
   details_action = "details",
-  notes_path = "/notes/", -- comments
   notes_list_action = "data",
+  notes_add_action = "addnotes",
+  notes_update_action = "updatenotes",
   note_text_field = "name",
   -- item field -> form field, for update and create
   form_fields = {
@@ -48,9 +53,14 @@ M.ENDPOINTS = {
     status_id = "statusid",
     type_id = "projitemtypeid",
     priority_id = "projpriorityid",
-    owner_ids = "users",
+    owner_ids = "users", -- create only: update ignores `users`
+    add_owner_ids = "newusers", -- update only
+    del_owner_ids = "delusers", -- update only
     points = "point",
+    check_dependent = "chkdependent",
   },
+  create_only = { owner_ids = true },
+  update_only = { add_owner_ids = true, del_owner_ids = true },
   created_id_keys = { "addedItemId", "itemId", "id" },
 }
 
@@ -77,6 +87,18 @@ function M.status_category(name, row)
     end
   end
   return "new"
+end
+
+--- An id field's value, or nil when Zoho means "none" ("", "0", "-1", -1). Pure.
+function M.real_id(v)
+  if v == nil or v == vim.NIL then
+    return nil
+  end
+  local str = tostring(v)
+  if str == "" or str == "0" or str == "-1" then
+    return nil
+  end
+  return str
 end
 
 local function lookup(tbl, id)
@@ -118,6 +140,7 @@ function M.normalise(row, ref, meta, side)
 
   local no = decode.pick(row, F.no)
   local epic = decode.pick(row, F.epic)
+  local is_parent = decode.pick(row, F.is_parent)
   return {
     id = row.id,
     key = M.display_key(no, row.id),
@@ -129,12 +152,15 @@ function M.normalise(row, ref, meta, side)
     assignee = #owners > 0 and table.concat(owners, ", ") or nil,
     owner_ids = decode.id_list(decode.pick(row, F.owners)),
     reporter = user(decode.pick(row, F.created_by)),
+    created_by_id = M.real_id(decode.pick(row, F.created_by)),
     priority = lookup(meta.priorities, decode.pick(row, F.priority)) or lookup(side.projPriority, decode.pick(row, F.priority)),
     priority_id = decode.pick(row, F.priority) and tostring(decode.pick(row, F.priority)) or nil,
     issue_type = lookup(meta.types, decode.pick(row, F.type)) or lookup(side.projItemType, decode.pick(row, F.type)),
     type_id = decode.pick(row, F.type) and tostring(decode.pick(row, F.type)) or nil,
     points = decode.pick(row, F.points),
     epic = epic and (lookup(side.epic, epic) or tostring(epic)) or nil,
+    parent_id = M.real_id(decode.pick(row, F.parent)),
+    is_parent = is_parent == true or is_parent == "true" or is_parent == 1 or is_parent == "1",
     created = decode.pick(row, F.created),
     updated = decode.pick(row, F.updated),
     description = decode.pick(row, F.description),
@@ -200,30 +226,59 @@ local function details_row(body, item_id)
   return inline, {}
 end
 
---- @return { author: string, created: any, body: string, id: string }[]
+--- Comments path: under the item module, not the item's sprint path. Pure.
+function M.notes_path(ref, module, note_id)
+  return ("/team/%s/projects/%s/modules/%s/entity/%s/notes/"):format(ref.team, ref.project, module, ref.item)
+    .. (note_id and (tostring(note_id) .. "/") or "")
+end
+
+--- Notes response -> comments, oldest first. Pure.
+---@param users table|nil meta.users
+function M.parse_comments(body, users)
+  body = body or {}
+  local names = type(body.userDisplayName) == "table" and body.userDisplayName or {}
+  local perms = decode.by_id(body, "permission")
+  local out = {}
+  for _, r in ipairs(decode.rows(body, "notes")) do
+    local author = r.createdBy and tostring(r.createdBy)
+    local p = perms[r.id] or {}
+    table.insert(out, {
+      id = r.id,
+      author = lookup(users, author) or (author and names[author]) or author or "Unknown",
+      created = r.createdOn or r.createdTime,
+      updated = r.updatedOn,
+      body = type(r.notes) == "string" and r.notes or "",
+      reply_to = M.real_id(r.parentCommentId),
+      can_edit = p.hasEditPermission ~= false,
+      can_delete = p.hasDeletePermission ~= false,
+    })
+  end
+  table.sort(out, function(x, y)
+    return tostring(x.created or "") < tostring(y.created or "")
+  end)
+  return out
+end
+
 function M.comments(ref, cb)
-  workspace.meta(ref.team, ref.project, function(meta, merr)
-    if not meta then
-      return cb(nil, merr)
+  local fields = require("sprints.api.fields")
+  async.all({
+    function(done)
+      workspace.meta(ref.team, ref.project, done)
+    end,
+    function(done)
+      fields.item_module(ref.team, done)
+    end,
+  }, function(res, err)
+    if not res then
+      return cb(nil, err)
     end
-    client.request("GET", item_path(ref) .. M.ENDPOINTS.notes_path:gsub("^/", ""),
-      { query = { action = M.ENDPOINTS.notes_list_action, index = 1, range = 100 } }, function(result, err)
+    local meta, module = res[1], res[2]
+    client.request("GET", M.notes_path(ref, module),
+      { query = { action = M.ENDPOINTS.notes_list_action, index = 1, range = 100 } }, function(result, rerr)
         if not result then
-          return cb(nil, err)
+          return cb(nil, rerr)
         end
-        local rows = workspace.rows_any(result.body or {}, { "notes", "note", "comment", "comments", "itemNotes" })
-        local side_users = decode.by_id(result.body or {}, "user")
-        local out = {}
-        for _, r in ipairs(rows) do
-          local author = decode.pick(r, { "createdBy", "addedBy", "ownerId", "userId" })
-          table.insert(out, {
-            id = r.id,
-            author = lookup(meta.users, author) or lookup(side_users, author) or (author and tostring(author)) or "Unknown",
-            created = decode.pick(r, { "createdTime", "addedTime", "createdOn", "createdTimeLong" }),
-            body = decode.pick(r, { "notes", "note", "comment", "content", "name" }) or "",
-          })
-        end
-        cb(out, nil)
+        cb(M.parse_comments(result.body, meta.users), nil)
       end)
   end)
 end
@@ -257,12 +312,30 @@ function M.get(ref, cb)
       local _, side = async.merge({ result.body or {} }, "item")
       local item = M.normalise(row, ref, meta, side)
       item.raw_body = result.body
-      M.comments(item.ref, function(comments, cerr)
-        if comments then
-          item.comments = comments
-        else
-          item.comments_error = cerr and cerr.message or "could not load comments"
-        end
+      local fields = require("sprints.api.fields")
+      async.all({
+        function(done)
+          M.comments(item.ref, function(comments, cerr)
+            if comments then
+              item.comments = comments
+            else
+              item.comments_error = cerr and cerr.message or "could not load comments"
+            end
+            done(true, nil)
+          end)
+        end,
+        function(done) -- custom fields: failure leaves them out, the item still shows
+          fields.project_fields(ref.team, ref.project, function(list, ferr)
+            if list then
+              item.field_defs = list
+              item.custom_fields = fields.values(item, list, meta.users)
+            else
+              item.fields_error = ferr and ferr.message or "could not load custom fields"
+            end
+            done(true, nil)
+          end)
+        end,
+      }, function()
         cb(item, nil)
       end)
     end)
@@ -270,13 +343,19 @@ function M.get(ref, cb)
 end
 
 --- Item fields (keys of ENDPOINTS.form_fields) -> form fields. Unknown keys are an error,
---- not silently dropped, so a typo can't look like a successful save.
-function M.to_form(fields)
+--- not silently dropped, so a typo can't look like a successful save. So is a field the
+--- other mode owns (owner_ids on update, add/del_owner_ids on create): Zoho would ignore it.
+---@param mode "create"|"update"
+function M.to_form(fields, mode)
+  local wrong = mode == "create" and M.ENDPOINTS.update_only or M.ENDPOINTS.create_only
   local form = {}
   for k, v in pairs(fields) do
-    local name = M.ENDPOINTS.form_fields[k]
+    local name = M.ENDPOINTS.form_fields[k] or (type(k) == "string" and k:match("^UDF_%u+%d+$") and k)
     if not name then
       error("sprints.nvim: unknown item field " .. k)
+    end
+    if wrong[k] then
+      error(("sprints.nvim: %s can't be sent on %s"):format(k, mode))
     end
     form[name] = type(v) == "number" and tostring(v) or v
   end
@@ -285,7 +364,7 @@ end
 
 --- Update some fields of an item. `fields` uses item field names (see form_fields).
 function M.update(ref, fields, cb)
-  local ok, form = pcall(M.to_form, fields)
+  local ok, form = pcall(M.to_form, fields, "update")
   if not ok then
     return async.fail(cb, form)
   end
@@ -302,7 +381,7 @@ function M.create(ref, fields, cb)
   if not (fields.name and fields.name:match("%S")) then
     return async.fail(cb, "an item needs a title")
   end
-  local ok, form = pcall(M.to_form, fields)
+  local ok, form = pcall(M.to_form, fields, "create")
   if not ok then
     return async.fail(cb, form)
   end
@@ -332,12 +411,60 @@ function M.statuses(ref, cb)
   end)
 end
 
-function M.set_status(ref, status_id, cb)
-  M.update(ref, { status_id = tostring(status_id) }, cb)
+--- Change status. `udf` ({ UDF_X = form value }) goes in the same request, for mandatory
+--- fields Zoho would otherwise refuse the change over.
+function M.set_status(ref, status_id, cb, udf)
+  local f = vim.tbl_extend("force", udf or {}, { status_id = tostring(status_id) })
+  if udf and next(udf) then
+    f.check_dependent = "true"
+  end
+  M.update(ref, f, cb)
 end
 
-function M.set_owners(ref, user_ids, cb)
-  M.update(ref, { owner_ids = user_ids }, cb)
+--- Owners as update wants them: what to add and what to remove, never the full list
+--- (update ignores `users`). Pure. Empty sides are left out, so no change = {}.
+---@param current string[]|nil owners now
+---@param wanted string[] owners after the change
+---@return { add_owner_ids: string[]|nil, del_owner_ids: string[]|nil }
+function M.owner_changes(current, wanted)
+  local function set_of(ids)
+    local s = {}
+    for _, id in ipairs(ids) do
+      s[tostring(id)] = true
+    end
+    return s
+  end
+  local now, after = set_of(current or {}), set_of(wanted)
+  local add, del = {}, {}
+  for _, id in ipairs(wanted) do
+    id = tostring(id)
+    if not now[id] and not vim.tbl_contains(add, id) then
+      table.insert(add, id)
+    end
+  end
+  for _, id in ipairs(current or {}) do
+    id = tostring(id)
+    if not after[id] and not vim.tbl_contains(del, id) then
+      table.insert(del, id)
+    end
+  end
+  return { add_owner_ids = #add > 0 and add or nil, del_owner_ids = #del > 0 and del or nil }
+end
+
+--- A copy of `fields` fit for update: owner_ids (the wanted list) becomes add/del diffs
+--- against `current_owner_ids`. Pure; other fields pass through.
+function M.update_fields(fields, current_owner_ids)
+  if fields.owner_ids == nil then
+    return fields
+  end
+  local out = vim.deepcopy(fields)
+  out.owner_ids = nil
+  return vim.tbl_extend("force", out, M.owner_changes(current_owner_ids, fields.owner_ids))
+end
+
+--- Set the owners to `wanted`, given the owners now (`current`).
+function M.set_owners(ref, current, wanted, cb)
+  M.update(ref, M.update_fields({ owner_ids = wanted }, current), cb)
 end
 
 --- Add or remove you as an owner, keeping everyone else (items can have several owners).
@@ -354,7 +481,7 @@ function M.toggle_me(ref, current, add, cb)
     if add then
       table.insert(owners, me)
     end
-    M.set_owners(ref, owners, cb)
+    M.set_owners(ref, current, owners, cb)
   end)
 end
 
@@ -363,14 +490,49 @@ function M.text_to_html(text)
   return require("sprints.markdown").to_html(text)
 end
 
+local function with_module(ref, cb, fn)
+  require("sprints.api.fields").item_module(ref.team, function(module, err)
+    if not module then
+      return cb(nil, err)
+    end
+    fn(module)
+  end)
+end
+
 function M.add_comment(ref, text, cb)
   if not text:match("%S") then
     return async.fail(cb, "comment is empty")
   end
-  client.request("POST", item_path(ref) .. M.ENDPOINTS.notes_path:gsub("^/", ""),
-    { form = { [M.ENDPOINTS.note_text_field] = M.text_to_html(text) } }, function(result, err)
+  with_module(ref, cb, function(module)
+    client.request("POST", M.notes_path(ref, module), { form = {
+      action = M.ENDPOINTS.notes_add_action,
+      [M.ENDPOINTS.note_text_field] = M.text_to_html(text),
+    } }, function(result, err)
       cb(result and true or nil, err)
     end)
+  end)
+end
+
+function M.edit_comment(ref, note_id, text, cb)
+  if not text:match("%S") then
+    return async.fail(cb, "comment is empty (use delete to remove it)")
+  end
+  with_module(ref, cb, function(module)
+    client.request("POST", M.notes_path(ref, module, note_id), { form = {
+      action = M.ENDPOINTS.notes_update_action,
+      [M.ENDPOINTS.note_text_field] = M.text_to_html(text),
+    } }, function(result, err)
+      cb(result and true or nil, err)
+    end)
+  end)
+end
+
+function M.delete_comment(ref, note_id, cb)
+  with_module(ref, cb, function(module)
+    client.request("DELETE", M.notes_path(ref, module, note_id), {}, function(result, err)
+      cb(result and true or nil, err)
+    end)
+  end)
 end
 
 function M.browse_url(ref, no)

@@ -14,6 +14,11 @@ local function item_under_cursor(bufnr)
   return s and s.by_line[vim.api.nvim_win_get_cursor(0)[1]] or nil
 end
 
+--- The item on the cursor line of a list buffer (0 = current), or nil.
+function M.item_under_cursor(bufnr)
+  return item_under_cursor(bufnr == 0 and vim.api.nvim_get_current_buf() or bufnr)
+end
+
 local function first_item_line(by_line)
   local first = nil
   for line in pairs(by_line) do
@@ -96,6 +101,8 @@ local HELP = {
   { "yank_key", "copy the item key" },
   { "yank_url", "copy the link" },
   { "browser", "open in browser" },
+  { "worklist", "make this list the worklist" },
+  { "worklist_add", "add item to the worklist" },
   { "refresh", "refresh" },
   { "close", "close" },
 }
@@ -137,6 +144,15 @@ local function setup_keymaps(bufnr)
   map("refresh", function()
     load(bufnr)
   end)
+  map("worklist", function()
+    local shown = state[bufnr].shown
+    if shown and #shown > 0 then
+      require("sprints.worklist").set(shown, vim.b[bufnr].sprints_list_title)
+    end
+  end)
+  map("worklist_add", on_item(function(it)
+    require("sprints.worklist").add(it)
+  end))
   map("mine", function()
     state[bufnr].mine_only = not state[bufnr].mine_only
     load(bufnr)
@@ -218,6 +234,28 @@ function M.open_with(name, title, fetch, opts)
   vim.wo.winbar = "<CR> open · n new · b board · m mine · yk key · g? more"
   load(bufnr)
   return bufnr
+end
+
+--- A list of `item`'s sub items.
+function M.open_children(item)
+  return M.open_with("children/" .. item.ref.item, item.key .. " — sub items", function(mine_only, cb)
+    require("sprints.api.hierarchy").children(item, function(children, err)
+      if not children or not mine_only then
+        return cb(children, err)
+      end
+      require("sprints.api.workspace").me(item.ref.team, item.ref.project, function(me, merr)
+        if not me then
+          return cb(nil, merr)
+        end
+        cb(vim.tbl_filter(function(it)
+          return vim.tbl_contains(it.owner_ids, me)
+        end, children), nil)
+      end)
+    end)
+  end, {
+    -- no new_target: `n` here would make a top-level item, not a sub item
+    project = { team = item.ref.team, project = item.ref.project },
+  })
 end
 
 --- Re-fetch every open list (after creating or changing items elsewhere).

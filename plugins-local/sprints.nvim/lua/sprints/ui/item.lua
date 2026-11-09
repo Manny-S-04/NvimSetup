@@ -1,5 +1,6 @@
 -- The item buffer: render, refresh, and the actions you can take from inside it.
--- Ported from jira.nvim's issue buffer; the buffer holds a `ref` (four ids) instead of a key.
+-- Ported from jira.nvim's issue buffer. Named by key like jira's (sprints://I22516), so harpoon,
+-- :b and :e find it again; the buffer also holds the `ref` (four ids) the API needs.
 local config = require("sprints.config")
 local items = require("sprints.api.items")
 local render = require("sprints.ui.render")
@@ -9,9 +10,27 @@ local workspace = require("sprints.api.workspace")
 local M = {}
 
 local last_item = {} -- bufnr -> item last rendered
+local last_marks = {} -- bufnr -> render marks (comment line ranges)
 
-local function buf_name(ref)
-  return ("sprints://%s/%s"):format(ref.project, ref.item)
+local function buf_name(key)
+  return "sprints://" .. key
+end
+
+--- Item key from an item buffer name ("sprints://I22516" -> "I22516"); nil for the other
+--- sprints:// buffers (lists, raw, edit, new comment). Also takes the name with its slashes
+--- collapsed ("sprints:/I22516"), which is how a path-normalising harpoon config stores it. Pure.
+---@param name string
+---@return string|nil
+function M.key_from_name(name)
+  return (name or ""):match("^sprints:[/\\]+([%w%-#]*%d+)$")
+end
+
+--- The item an item buffer shows (nil if it isn't one, or it hasn't loaded yet).
+function M.item_of(bufnr)
+  if not bufnr or bufnr == 0 then
+    bufnr = vim.api.nvim_get_current_buf()
+  end
+  return last_item[bufnr]
 end
 
 local function ref_of(bufnr)
@@ -23,7 +42,8 @@ local function key_of(bufnr)
 end
 
 local function render_into(bufnr, item)
-  local lines, highlights = render.render(item)
+  local lines, highlights, marks = render.render(item)
+  last_marks[bufnr] = marks
   util.set_lines(bufnr, lines)
   util.apply_highlights(bufnr, highlights)
   vim.b[bufnr].sprints_ref = item.ref
@@ -31,6 +51,9 @@ local function render_into(bufnr, item)
   vim.b[bufnr].sprints_url = items.browse_url(item.ref, item.no)
   last_item[bufnr] = item
   util.set_readonly(bufnr, true)
+  pcall(function()
+    require("sprints.worklist").update(item) -- keep the worklist's status column current
+  end)
 end
 
 function M.refresh(bufnr, on_done)
@@ -54,9 +77,10 @@ end
 
 --- Refresh the item buffer showing `ref`, if one is open (after an edit made elsewhere).
 function M.refresh_ref(ref)
-  local bufnr = util.find_buf_by_name(buf_name(ref))
-  if bufnr then
-    M.refresh(bufnr)
+  for bufnr, item in pairs(last_item) do
+    if vim.api.nvim_buf_is_valid(bufnr) and item.ref.item == ref.item then
+      M.refresh(bufnr)
+    end
   end
 end
 
@@ -89,12 +113,88 @@ function M.change_status(bufnr)
         return s.name
       end,
     }, function(choice)
-      if choice then
-        items.set_status(ref, choice.id,
-          after(bufnr, ("%s: %s → %s"):format(key_of(bufnr), item.status or "?", choice.name)))
+      if not choice then
+        return
+      end
+      local what = ("%s: %s → %s"):format(key_of(bufnr), item.status or "?", choice.name)
+      -- mandatory custom fields still empty: ask for them and send them with the change,
+      -- since Zoho refuses the status change without them
+      local missing = require("sprints.api.fields").missing(item, item.field_defs or {})
+      if #missing == 0 then
+        return items.set_status(ref, choice.id, after(bufnr, what))
+      end
+      require("sprints.ui.fields").ask_all(missing, ref, function(udf)
+        if not udf then
+          return vim.notify("sprints.nvim: status change cancelled", vim.log.levels.WARN)
+        end
+        items.set_status(ref, choice.id, after(bufnr, what), udf)
+      end)
+    end)
+  end)
+end
+
+--- Set one of the project's custom fields.
+function M.set_field(bufnr)
+  local ref, item = ref_of(bufnr), last_item[bufnr] or {}
+  local list = item.custom_fields or {}
+  if #list == 0 then
+    return vim.notify("sprints.nvim: " .. (item.fields_error or "this project has no custom fields"),
+      vim.log.levels.WARN)
+  end
+  vim.ui.select(list, {
+    prompt = key_of(bufnr) .. " field",
+    format_item = function(v)
+      return ("%s: %s"):format(v.field.name, v.text or (v.field.mandatory and "(empty, required)" or "—"))
+    end,
+  }, function(v)
+    if not v then
+      return
+    end
+    require("sprints.ui.fields").ask(v.field, ref, function(value, label)
+      if value ~= nil then
+        items.update(ref, { [v.field.udf] = value },
+          after(bufnr, ("%s: %s → %s"):format(key_of(bufnr), v.field.name, label or tostring(value))))
       end
     end)
   end)
+end
+
+--- The comment under the cursor, or nil (with a message).
+local function comment_under_cursor(bufnr)
+  local item = last_item[bufnr] or {}
+  local i = render.comment_at(last_marks[bufnr], vim.api.nvim_win_get_cursor(0)[1] - 1)
+  local c = i and item.comments and item.comments[i]
+  if not c then
+    vim.notify("sprints.nvim: put the cursor on a comment first", vim.log.levels.WARN)
+  end
+  return c
+end
+
+function M.edit_comment(bufnr)
+  local c = comment_under_cursor(bufnr)
+  if not c then
+    return
+  end
+  if not c.can_edit then
+    return vim.notify("sprints.nvim: Zoho says you can't edit that comment", vim.log.levels.WARN)
+  end
+  require("sprints.ui.comment").open(ref_of(bufnr), key_of(bufnr), function()
+    M.refresh(bufnr)
+  end, { note_id = c.id, lines = require("sprints.html").to_lines(c.body) })
+end
+
+function M.delete_comment(bufnr)
+  local c = comment_under_cursor(bufnr)
+  if not c then
+    return
+  end
+  if not c.can_delete then
+    return vim.notify("sprints.nvim: Zoho says you can't delete that comment", vim.log.levels.WARN)
+  end
+  local first = (require("sprints.html").to_lines(c.body)[1] or ""):sub(1, 50)
+  if util.confirm(("Delete %s's comment on %s (%s…)?"):format(c.author, key_of(bufnr), first)) then
+    items.delete_comment(ref_of(bufnr), c.id, after(bufnr, key_of(bufnr) .. ": comment deleted"))
+  end
 end
 
 --- Add yourself as an owner, or remove yourself if you already are one. Others are kept.
@@ -141,7 +241,7 @@ function M.pick_owner(bufnr)
       if adding then
         table.insert(owners, choice.id)
       end
-      items.set_owners(ref, owners,
+      items.set_owners(ref, current, owners,
         after(bufnr, ("%s: %s %s"):format(key_of(bufnr), adding and "added" or "removed", choice.name)))
     end)
   end)
@@ -153,7 +253,7 @@ function M.unassign_all(bufnr)
     return vim.notify("sprints.nvim: " .. key_of(bufnr) .. " has no owners")
   end
   if util.confirm(("Remove all owners (%s) from %s?"):format(item.assignee or "", key_of(bufnr))) then
-    items.set_owners(ref_of(bufnr), {}, after(bufnr, key_of(bufnr) .. ": removed all owners"))
+    items.set_owners(ref_of(bufnr), item.owner_ids, {}, after(bufnr, key_of(bufnr) .. ": removed all owners"))
   end
 end
 
@@ -222,6 +322,43 @@ function M.yank_url(bufnr)
   end
 end
 
+function M.open_parent(bufnr)
+  local item = last_item[bufnr]
+  if not item then
+    return
+  end
+  require("sprints.api.hierarchy").parent(item, function(parent, err)
+    if err then
+      return util.notify_error("could not open " .. key_of(bufnr) .. "'s parent", err)
+    end
+    if not parent then
+      return vim.notify("sprints.nvim: " .. key_of(bufnr) .. " has no parent", vim.log.levels.WARN)
+    end
+    M.open(parent)
+  end)
+end
+
+function M.open_children(bufnr)
+  local item = last_item[bufnr]
+  if item then
+    require("sprints.ui.list").open_children(item)
+  end
+end
+
+function M.work(bufnr)
+  local item = last_item[bufnr]
+  if item then
+    require("sprints.worklist").work(item)
+  end
+end
+
+function M.worklist_add(bufnr)
+  local item = last_item[bufnr]
+  if item then
+    require("sprints.worklist").add(item)
+  end
+end
+
 --- The raw API payload, for checking field names while the API mapping is being confirmed.
 function M.show_raw(bufnr)
   local item = last_item[bufnr]
@@ -240,6 +377,9 @@ local ACTIONS = {
   { "status", M.change_status, "change status" },
   { "edit", M.edit, "edit title, description, fields (:w saves)" },
   { "comment", M.comment, "add a comment (:w posts)" },
+  { "comment_edit", M.edit_comment, "edit the comment under the cursor (:w saves)" },
+  { "comment_delete", M.delete_comment, "delete the comment under the cursor (asks first)" },
+  { "field", M.set_field, "set a custom field" },
   { "assign_me", M.toggle_me, "add / remove yourself as owner" },
   { "owners", M.pick_owner, "add / remove an owner" },
   { "unassign", M.unassign_all, "remove all owners (asks first)" },
@@ -247,6 +387,10 @@ local ACTIONS = {
   { "yank_key", M.yank_key, "copy the item key" },
   { "yank_url", M.yank_url, "copy the link" },
   { "browser", M.open_in_browser, "open in browser" },
+  { "parent", M.open_parent, "open the parent" },
+  { "children", M.open_children, "list child items" },
+  { "work", M.work, "worklist = the parent's items (:SprintsWork)" },
+  { "worklist_add", M.worklist_add, "add to the worklist" },
   { "raw", M.show_raw, "show the raw API response" },
   { "refresh", M.refresh, "refresh" },
   {
@@ -277,28 +421,95 @@ local function setup_keymaps(bufnr)
   end
 end
 
+--- One-time setup of a new item buffer.
+local function prepare(bufnr)
+  -- markdown highlighting for descriptions/comments (parser ships with Neovim);
+  -- the plugin's own extmark highlights layer on top
+  if not pcall(vim.treesitter.start, bufnr, "markdown") then
+    vim.bo[bufnr].syntax = "markdown"
+  end
+  vim.api.nvim_create_autocmd("BufWipeout", {
+    buffer = bufnr,
+    once = true,
+    callback = function()
+      last_item[bufnr] = nil
+      last_marks[bufnr] = nil
+    end,
+  })
+end
+
+local function set_winbar(bufnr, item)
+  local win = vim.fn.bufwinid(bufnr)
+  if win ~= -1 then
+    vim.wo[win].winbar = "%#sprintsKey# " .. (item.key or "") .. " %* s status · e edit · c comment · a me · o owners · g? more"
+  end
+end
+
 function M.open(item, opts)
   util.setup_highlight_groups()
-  local bufnr, created = util.named_scratch(buf_name(item.ref), "sprints-item")
+  local bufnr, created = util.named_scratch(buf_name(item.key), "sprints-item")
   if created then
-    -- markdown highlighting for descriptions/comments (parser ships with Neovim);
-    -- the plugin's own extmark highlights layer on top
-    if not pcall(vim.treesitter.start, bufnr, "markdown") then
-      vim.bo[bufnr].syntax = "markdown"
-    end
-    vim.api.nvim_create_autocmd("BufWipeout", {
-      buffer = bufnr,
-      once = true,
-      callback = function()
-        last_item[bufnr] = nil
-      end,
-    })
+    prepare(bufnr)
   end
   render_into(bufnr, item)
   setup_keymaps(bufnr)
   util.show(bufnr, vim.tbl_extend("force", { role = "item" }, opts or {}))
-  vim.wo.winbar = "%#sprintsKey# " .. (item.key or "") .. " %* s status · e edit · c comment · a me · o owners · g? more"
+  set_winbar(bufnr, item)
   return bufnr
+end
+
+--- BufReadCmd for sprints://<KEY>: Neovim made this buffer from the name alone (harpoon after
+--- the buffer was closed, :e sprints://I12, a restored session), so find the item and fill it.
+function M.read_cmd(bufnr)
+  local name = vim.api.nvim_buf_get_name(bufnr)
+  local key = M.key_from_name(name)
+  if not key or last_item[bufnr] then
+    return -- not an item buffer, or already filled (nothing to re-read: r refreshes)
+  end
+  if name ~= buf_name(key) then
+    -- A mangled name (sprints:/I12): swap in the real buffer once the caller (e.g. harpoon's
+    -- select) has shown this one, then drop it. Scheduled because the caller still uses it.
+    util.make_scratch(bufnr, "sprints-item")
+    vim.bo[bufnr].bufhidden = "wipe"
+    return vim.schedule(function()
+      local target = util.find_buf_by_name(buf_name(key))
+      if not target then
+        target = vim.fn.bufadd(buf_name(key))
+        vim.fn.bufload(target) -- runs this function again, for the real name
+      end
+      for _, win in ipairs(vim.fn.win_findbuf(bufnr)) do
+        vim.api.nvim_win_set_buf(win, target)
+      end
+      if vim.api.nvim_buf_is_valid(bufnr) then
+        vim.api.nvim_buf_delete(bufnr, { force = true })
+      end
+    end)
+  end
+  util.setup_highlight_groups()
+  util.make_scratch(bufnr, "sprints-item")
+  prepare(bufnr)
+  util.set_lines(bufnr, { "# " .. key, "", "Loading…" })
+  util.set_readonly(bufnr, true)
+  if not config.validate() then
+    return
+  end
+  require("sprints.ui.context").project(function(team, project)
+    require("sprints.api.find").item(team, project, key, function(found, note)
+      if not found then
+        return util.notify_error("could not find " .. key, note)
+      end
+      items.get(found.ref, function(item, err)
+        if not item then
+          return util.notify_error("failed to fetch " .. key, err)
+        end
+        if vim.api.nvim_buf_is_valid(bufnr) then
+          render_into(bufnr, item)
+          setup_keymaps(bufnr)
+          set_winbar(bufnr, item)
+        end
+      end)
+    end)
+  end)
 end
 
 --- Fetch and open. `hint` (e.g. the key from a list row) only feeds the loading message.

@@ -58,11 +58,17 @@ function M.named_scratch(name, filetype)
   end
   bufnr = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_buf_set_name(bufnr, name)
+  M.make_scratch(bufnr, filetype)
+  return bufnr, true
+end
+
+--- Scratch options for a plugin buffer (also used on a buffer Neovim created for us, when
+--- `:e sprints://I12` / harpoon / a session reopens an item by name).
+function M.make_scratch(bufnr, filetype)
   vim.bo[bufnr].filetype = filetype
   vim.bo[bufnr].buftype = "nofile"
   vim.bo[bufnr].swapfile = false
   vim.bo[bufnr].bufhidden = "hide"
-  return bufnr, true
 end
 
 --- The current window holds nothing worth keeping: an unnamed, unmodified, empty buffer

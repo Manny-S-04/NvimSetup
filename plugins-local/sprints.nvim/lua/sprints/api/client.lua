@@ -228,7 +228,7 @@ end
 --- An expired/revoked access token is refreshed and the request retried once.
 ---@param method string
 ---@param path string relative to /zsapi, e.g. "/teams/"
----@param opts { query: table|nil, form: table|nil }|nil
+---@param opts { query: table|nil, form: table|nil, headers: table|nil }|nil
 ---@param cb fun(result: table|nil, err: table|nil)
 function M.request(method, path, opts, cb)
   opts = opts or {}
@@ -245,7 +245,9 @@ function M.request(method, path, opts, cb)
       if not token then
         return cb(nil, terr)
       end
-      M.raw(method, url, { headers = { Authorization = "Zoho-oauthtoken " .. token }, form = opts.form },
+      -- caller headers (e.g. X-ZA-REQSIZE) pass through; Authorization is always ours
+      local headers = vim.tbl_extend("force", opts.headers or {}, { Authorization = "Zoho-oauthtoken " .. token })
+      M.raw(method, url, { headers = headers, form = opts.form },
         function(result, err)
           if not result and not retried and is_auth_failure(err) then
             auth.invalidate()
