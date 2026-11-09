@@ -186,7 +186,7 @@ return {
         },
     },
 
-    -- ── git / jira ───────────────────────────────────────────────────────────────────
+    -- ── git / jira / sprints ─────────────────────────────────────────────────────────
     {
         id = "git",
         title = "Git: review, stage, blame, history",
@@ -234,6 +234,42 @@ return {
             { keys = "W", text = "In a Jira list: make this whole list the worklist", buffer = true },
             { keys = "+", text = "In a list or ticket: add this ticket to the worklist", buffer = true },
             { cmd = ":JiraWorklist refresh", text = "Re-fetch statuses (✓ marks done tickets)" },
+        },
+    },
+    {
+        id = "sprints",
+        title = "Zoho Sprints items",
+        contexts = { "sprints" },
+        steps = {
+            { cmd = ":SprintsBoard", text = "Open the board (active sprint by status) (Space sb)" },
+            { cmd = ":SprintsMine", text = "My items in the active sprint (Space sm)" },
+            { cmd = ":SprintsFind", text = "Find items from menus (Space sf); :SprintsFind <preset> reruns a saved one" },
+            { cmd = ":SprintsSearch", text = "Search by title or number (Space ss)" },
+            { cmd = ":SprintsItem", text = "Open an item by key (:SprintsItem I123)" },
+            { cmd = ":SprintsNew", text = "New item (Space sn)" },
+            { keys = "<CR>", text = "In a list: open the item", buffer = true },
+            { keys = "s", text = "In an item: change status", buffer = true },
+            { keys = "e", text = "In an item: edit title/description", buffer = true },
+            { keys = "c", text = "In an item: comment (C edits, dc deletes)", buffer = true },
+            { keys = "a", text = "In an item: assign to me (A unassigns, o owners)", buffer = true },
+            { keys = "gx", text = "Open in the browser", buffer = true },
+            { keys = "gp", text = "In an item: open its parent (gc lists its sub items)", buffer = true },
+            { keys = "g?", text = "All item keys", buffer = true },
+        },
+    },
+    {
+        id = "sprints-worklist",
+        title = "Work through a parent's sub items (Sprints worklist)",
+        summary = "Given I123 whose parent has the items you're meant to do: the parent's sub items become a harpoon list.",
+        contexts = { "sprints", "general" },
+        steps = {
+            { cmd = ":SprintsWork", text = "Worklist = the parent's sub items (:SprintsWork I123, or W in an item)" },
+            { keys = "<leader>sw", text = "Open the worklist (reorder / delete lines like harpoon)" },
+            { keys = "<leader>sj", text = "Next item in the worklist" },
+            { keys = "<leader>sk", text = "Previous item" },
+            { keys = "W", text = "In a Sprints list: make this whole list the worklist", buffer = true },
+            { keys = "+", text = "In a list or item: add this item to the worklist", buffer = true },
+            { cmd = ":SprintsWorklist refresh", text = "Re-fetch statuses" },
         },
     },
 

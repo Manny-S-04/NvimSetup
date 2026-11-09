@@ -101,6 +101,9 @@ function M.context(buf)
     elseif ft:match("^jira") then
         table.insert(tags, "jira")
         label = label or "Jira"
+    elseif ft:match("^sprints") then
+        table.insert(tags, "sprints")
+        label = label or "Sprints"
     elseif ft == "qf" or ft == "trouble" then
         table.insert(tags, "errors")
         label = label or "Error list"
