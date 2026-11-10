@@ -122,13 +122,11 @@ describe("render: custom fields and comments", function()
     },
   }
 
-  it("shows set fields and empty required ones, hides other empty ones", function()
+  it("shows every layout field, empty required ones flagged and other empty ones as a dash", function()
     local lines = render.render(item)
     assert.truthy(vim.tbl_contains(lines, "AI Assisted:  (empty, required)"))
+    assert.truthy(vim.tbl_contains(lines, "Notes:        —"))
     assert.truthy(vim.tbl_contains(lines, "A very long field name: v"))
-    for _, l in ipairs(lines) do
-      assert.is_nil(l:match("^Notes:"))
-    end
   end)
 
   it("maps cursor lines to comments", function()

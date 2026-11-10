@@ -85,13 +85,13 @@ function M.render(item)
     end
   end
 
+  -- Every field in the project's layout is shown, empty ones as "—", so the header matches
+  -- what F offers and you can see what's left to fill in.
   for _, v in ipairs(item.custom_fields or {}) do
-    local text = v.text or (v.field.mandatory and "(empty, required)") or nil
-    if text then
-      local label = v.field.name .. ":"
-      local idx = add(label .. string.rep(" ", math.max(1, 14 - #label)) .. text)
-      hl(idx, 0, #label, "sprintsLabel")
-    end
+    local text = v.text or (v.field.mandatory and "(empty, required)") or "—"
+    local label = v.field.name .. ":"
+    local idx = add(label .. string.rep(" ", math.max(1, 14 - #label)) .. text)
+    hl(idx, 0, #label, "sprintsLabel")
   end
   if item.fields_error then
     add("(custom fields unavailable: " .. item.fields_error .. ")")
