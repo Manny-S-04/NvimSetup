@@ -8,13 +8,16 @@
 --   definitions: GET  /team/T/settings/customization/modules/{module}/fields/?action=data
 --                     (settings.READ) -> customfieldJObj: fieldName, udfName, fieldType,
 --                     optionGroups (optgroup_prop: groupName, options; options_prop: optionTitle)
+--                     Live-confirmed 2026-11-10: optionGroups = { groupIds, groupJObj = {
+--                     [gid] = { groupName, { optionIds, optionJObj = { [oid] = { optionTitle,
+--                     userId } } } } } }; vim.empty_dict() on fields without options.
 --   per project: GET  /team/T/projects/P/modules/{module}/?action=formfields (projects.READ)
 --                     -> sectionVSfields[section].fieldJObj[fieldId]: sequence, isMandatory, ...
 --   values:      item details' item_prop carries the UDF_* columns; update takes UDF_<n>=value
 --                     (picklist / radio / boolean / user picklist = option or user id,
 --                     multi picklist / checkbox = JSON array).
--- UNVERIFIED: the exact nesting of optionGroups (the reference's examples are all empty), so
--- options() walks it loosely. Zoho has no per-status rules in the API: "mandatory" is the
+-- options() reads that grouped shape directly (keeping Zoho's order) and falls back to a loose
+-- walk for anything else (fieldOption). Zoho has no per-status rules in the API: "mandatory" is the
 -- layout's flag, and the status prompt asks for any mandatory field that is still empty.
 local async = require("sprints.api.async")
 local client = require("sprints.api.client")
@@ -67,10 +70,46 @@ local function is_id(k)
   return type(k) == "string" and k:match("^%d+$") ~= nil
 end
 
---- optionGroups / fieldOption -> { {id, title}, ... } in a stable order. Takes the shapes Zoho
---- uses elsewhere: { [id] = { "Title", ... } }, { [id] = "Title" }, and lists / groups
---- ({ "Group", { [id] = {...} } }) wrapping those. Pure.
-function M.options(v)
+--- The confirmed optionGroups shape -> { {id, title}, ... } in Zoho's order (groupIds, then
+--- each group's optionIds), or nil when v isn't that shape. Pure.
+---@param v any
+---@param group_prop table<string, integer> optgroup_prop from the same response
+---@param option_prop table<string, integer> options_prop from the same response
+---@return { id: string, title: string }[]|nil
+local function grouped_options(v, group_prop, option_prop)
+  if type(v) ~= "table" or type(v.groupJObj) ~= "table" or type(v.groupIds) ~= "table" then
+    return nil
+  end
+  local options_at = (tonumber(group_prop.options) or 1) + 1
+  local title_at = (tonumber(option_prop.optionTitle) or 0) + 1
+  local out, seen = {}, {}
+  for _, gid in ipairs(v.groupIds) do
+    local group = v.groupJObj[gid]
+    local opts = type(group) == "table" and group[options_at] or nil
+    if type(opts) == "table" and type(opts.optionJObj) == "table" then
+      for _, oid in ipairs(opts.optionIds or {}) do
+        local o = opts.optionJObj[oid]
+        local title = type(o) == "table" and o[title_at] or nil
+        if type(title) == "string" and not seen[oid] then
+          seen[oid] = true
+          table.insert(out, { id = tostring(oid), title = title })
+        end
+      end
+    end
+  end
+  return out
+end
+
+--- optionGroups / fieldOption -> { {id, title}, ... }. The confirmed grouped shape keeps Zoho's
+--- order; anything else is walked loosely: { [id] = { "Title", ... } }, { [id] = "Title" }, and
+--- lists / groups ({ "Group", { [id] = {...} } }) wrapping those, sorted by id. Pure.
+---@param body table|nil the definitions response, for optgroup_prop / options_prop
+function M.options(v, body)
+  body = type(body) == "table" and body or {}
+  local grouped = grouped_options(v, body.optgroup_prop or {}, body.options_prop or {})
+  if grouped then
+    return grouped
+  end
   local out, seen = {}, {}
   local function walk(node, depth)
     if type(node) ~= "table" or depth > 6 then
@@ -82,8 +121,10 @@ function M.options(v)
     end)
     for _, k in ipairs(keys) do
       local val = node[k]
+      -- { "Group", { ...options } } is a group to descend into, not an option titled "Group".
+      local is_group = type(val) == "table" and type(val[2]) == "table"
       local title = type(val) == "string" and val
-        or (type(val) == "table" and type(val[1]) == "string" and val[1])
+        or (type(val) == "table" and not is_group and type(val[1]) == "string" and val[1])
         or (type(val) == "table" and type(val.optionTitle) == "string" and val.optionTitle)
       if is_id(k) and title then
         if not seen[k] then
@@ -103,9 +144,9 @@ end
 function M.parse_definitions(body)
   local out = {}
   for _, r in ipairs(decode.rows(body or {}, "customfield")) do
-    local opts = M.options(r.optionGroups)
+    local opts = M.options(r.optionGroups, body)
     if #opts == 0 then
-      opts = M.options(r.fieldOption)
+      opts = M.options(r.fieldOption, body)
     end
     out[r.id] = {
       id = r.id,

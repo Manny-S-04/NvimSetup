@@ -19,6 +19,46 @@ describe("sprints.api.fields", function()
     assert.are.same({}, fields.options(vim.NIL))
   end)
 
+  -- Trimmed from a live definitions response (2026-11-10).
+  local live = {
+    customfield_prop = { fieldName = 0, fieldType = 3, udfName = 6, fieldOption = 7, fieldProperties = 11, optionGroups = 13 },
+    optgroup_prop = { groupName = 0, options = 1 },
+    options_prop = { optionTitle = 0, userId = 1 },
+    customfieldIds = { "509", "859", "175" },
+    customfieldJObj = {
+      ["509"] = { "Requested By", "", false, 7, false, false, "UDF_PKL1", 0, 2, -1, "", {}, 0, {
+        groupIds = { "g2", "g1" },
+        groupJObj = {
+          g1 = { "Internal", { optionIds = { "o3" }, optionJObj = { o3 = { "Support Team", "" } } } },
+          g2 = { "Clients", { optionIds = { "o2", "o1" }, optionJObj = { o1 = { "Unknown", "" }, o2 = { "Barts", "" } } } },
+        },
+      } },
+      ["859"] = { "AI Assisted", "", false, 15, false, false, "UDF_BOOLEAN1", 0, 2, -1, "", {}, 0, {
+        groupIds = { "gd" },
+        groupJObj = { gd = { "Default", { optionIds = { "y", "n" }, optionJObj = { y = { "Yes", "" }, n = { "No", "" } } } } },
+      } },
+      ["175"] = { "Assignee", "Select Owner", true, 10, false, false, "OWNER_ID", 0, 2, -1, "", {}, 1, vim.empty_dict() },
+    },
+  }
+
+  it("reads the live grouped optionGroups shape in Zoho's order, not group names", function()
+    local defs = fields.parse_definitions(live)
+    assert.are.same({
+      { id = "o2", title = "Barts" },
+      { id = "o1", title = "Unknown" },
+      { id = "o3", title = "Support Team" },
+    }, defs["509"].options)
+    assert.are.same({ { id = "y", title = "Yes" }, { id = "n", title = "No" } }, defs["859"].options)
+    assert.are.same({}, defs["175"].options)
+  end)
+
+  it("shows option titles for live picklist values", function()
+    local defs = fields.parse_definitions(live)
+    assert.are.equal("Barts", fields.display(defs["509"], "o2"))
+    assert.are.equal("Yes", fields.display(defs["859"], "y"))
+    assert.is_nil(fields.display(defs["859"], ""))
+  end)
+
   it("keeps only the layout's UDF fields, in layout order, with the mandatory flag", function()
     local defs = {
       a = { id = "a", name = "A", udf = "UDF_CHAR1", options = {} },
