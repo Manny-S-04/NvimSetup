@@ -85,10 +85,16 @@ function M.refresh_ref(ref)
 end
 
 --- Callback for an update: report `what` (e.g. "I1: To do → Done") and refresh.
+--- An update's callback. A failure may mean the project changed under us (a status, type or
+--- field id this session cached was deleted, and Zoho answers that with a 500), so the
+--- project caches are dropped: the next attempt offers the current workflow.
 local function after(bufnr, what)
   return function(ok, err)
     if not ok then
-      return util.notify_error(what .. " failed", err)
+      require("sprints.api.cache").clear()
+      local msg = (err and err.message or "unknown error")
+        .. " (project statuses/fields reloaded in case the workflow changed: try again)"
+      return util.notify_error(what .. " failed", { message = msg })
     end
     vim.notify("sprints.nvim: " .. what)
     M.refresh(bufnr)

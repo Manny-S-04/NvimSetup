@@ -81,7 +81,9 @@ that doesn't expire, and the plugin mints short-lived access tokens from it.
 | `:SprintsWorklist [sub]` | `<leader>sw` `sj` `sk` | Open the worklist; `refresh` `add` `next` `prev` |
 | `:SprintsSprint [pick]` | | Active sprint(s); `pick` chooses any (active first) |
 | `:SprintsProject` | | Switch project for the session |
-| `:SprintsRaw <what>` | | Raw API response: `teams projects project sprints statuses users`, `get <path> [k=v ...]` |
+| `:SprintsReload` | | Re-fetch cached statuses, users and custom fields (after an admin changes the workflow) and refresh open buffers. A failed update does this too. |
+| `:SprintsIds` | | The team (zsoid), project, item module, sprint and item ids for the item or list row you're on; pick one to yank it |
+| `:SprintsRaw <what>` | | Raw API response: `teams projects project sprints statuses users modules fields layout`, `get <path> [k=v ...]` (path may use `{team} {project} {module} {sprint} {item}`) |
 | `:Sprints` | | Help |
 
 **List** — `<CR>` open · `n` new item here · `b` board view · `m` only mine · `yk`/`yu` copy key/link ·

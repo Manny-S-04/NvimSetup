@@ -355,14 +355,37 @@ local RAW = {
   statuses = function(team, project, cb)
     api("client").request("GET", ("/team/%s/projects/%s/itemstatus/"):format(team, project), { query = { action = "data" } }, cb)
   end,
-  -- :SprintsRaw get <path> [key=value ...] — any GET; {team} and {project} are filled in.
-  -- e.g. :SprintsRaw get /team/{team}/projects/{project}/sprints/<id>/item/ action=data viewtype=1 searchby=both searchvalue=22516
-  get = function(team, project, cb, args)
+  modules = function(team, _, cb)
+    api("client").request("GET", ("/team/%s/settings/customization/modules/"):format(team),
+      { query = { action = "data", index = 1, range = 50 } }, cb)
+  end,
+  -- custom field definitions and the project's field layout (both under the item module)
+  fields = function(team, _, cb)
+    api("fields").item_module(team, function(module, err)
+      if not module then
+        return cb(nil, err)
+      end
+      api("client").request("GET", ("/team/%s/settings/customization/modules/%s/fields/"):format(team, module),
+        { query = { action = "data" } }, cb)
+    end)
+  end,
+  layout = function(team, project, cb)
+    api("fields").item_module(team, function(module, err)
+      if not module then
+        return cb(nil, err)
+      end
+      api("client").request("GET", ("/team/%s/projects/%s/modules/%s/"):format(team, project, module),
+        { query = { action = "formfields" } }, cb)
+    end)
+  end,
+  -- :SprintsRaw get <path> [key=value ...] — any GET. {team} {project} {module} {sprint} {item}
+  -- are filled in from the item / list row you're on (else config), like :SprintsIds shows.
+  -- e.g. :SprintsRaw get /team/{team}/projects/{project}/sprints/{sprint}/item/{item}/ action=details
+  get = function(_, _, cb, args)
     local path = table.remove(args, 1)
     if not path then
       return cb(nil, { message = "usage: :SprintsRaw get <path> [key=value ...]" })
     end
-    path = path:gsub("{team}", team or ""):gsub("{project}", project or "")
     local query = {}
     for _, kv in ipairs(args) do
       local k, v = kv:match("^([^=]+)=(.*)$")
@@ -371,7 +394,13 @@ local RAW = {
       end
       query[k] = v
     end
-    api("client").request("GET", path, { query = query, headers = { ["X-ZA-REQSIZE"] = "large" } }, cb)
+    require("sprints.ids").collect(function(ids)
+      local filled, missing = require("sprints.ids").fill(path, ids)
+      if not filled then
+        return cb(nil, { message = ("no %s id here for {%s} (open an item or put the cursor on a list row)"):format(missing, missing) })
+      end
+      api("client").request("GET", filled, { query = query, headers = { ["X-ZA-REQSIZE"] = "large" } }, cb)
+    end)
   end,
   users = function(team, project, cb)
     api("client").request("GET", ("/team/%s/projects/%s/users/"):format(team, project), { query = { action = "data", index = 1, range = 10 } }, cb)
@@ -390,10 +419,42 @@ local function cmd_raw(cmd_opts)
       require("sprints.ui.item").show_value("sprints://raw/" .. what, result and result.body or { error = err })
     end, args)
   end
-  if what == "teams" then
+  if what == "teams" or what == "get" then
     return go(nil, nil)
   end
   require("sprints.ui.context").project(go)
+end
+
+--- :SprintsIds — the ids for what you're on; pick one to yank it (to " and +).
+local function cmd_ids()
+  local ids = require("sprints.ids")
+  ids.collect(function(found)
+    local rows = ids.rows(found)
+    vim.ui.select(rows, {
+      prompt = "Sprints ids (pick to yank)",
+      format_item = function(r)
+        return ("%-28s %s"):format(r.label, r.value)
+      end,
+    }, function(r)
+      if r then
+        vim.fn.setreg('"', r.value)
+        pcall(vim.fn.setreg, "+", r.value)
+        vim.notify("sprints.nvim: yanked " .. r.value)
+      end
+    end)
+  end)
+end
+
+--- :SprintsReload — drop cached statuses / users / fields and re-fetch what's open.
+local function cmd_reload()
+  api("cache").clear()
+  local item = require("sprints.ui.item")
+  local bufnr = vim.api.nvim_get_current_buf()
+  if item.item_of(bufnr) then
+    item.refresh(bufnr)
+  end
+  require("sprints.ui.list").refresh_all()
+  vim.notify("sprints.nvim: reloaded project statuses, users and fields")
 end
 
 local function cmd_help()
@@ -415,7 +476,10 @@ local function cmd_help()
     "  :SprintsChildren [KEY]  List KEY's sub items",
     "  :SprintsWork [KEY]      Worklist = KEY's parent's sub items (needs harpoon)",
     "  :SprintsWorklist [sub]  Open the worklist; refresh | add | next | prev",
-    "  :SprintsRaw <what>      Raw API response (teams|projects|project|sprints|statuses|users|get PATH k=v…)",
+    "  :SprintsReload          Re-fetch statuses/users/fields (after a workflow change) and open buffers",
+    "  :SprintsIds             Team/project/module/sprint/item ids for what you're on; pick to yank",
+    "  :SprintsRaw <what>      Raw API response (teams|projects|project|sprints|statuses|users|modules|fields|layout|",
+    "                          get PATH k=v…, PATH may use {team} {project} {module} {sprint} {item})",
     "",
     "In a list or an item, g? shows its keys.",
     "",
@@ -471,6 +535,8 @@ local COMMANDS = {
   { "SprintsRefresh", function()
     require("sprints.ui.item").refresh(vim.api.nvim_get_current_buf())
   end, { nargs = 0, desc = "Refresh the current item buffer" } },
+  { "SprintsReload", cmd_reload, { nargs = 0, desc = "Re-fetch project statuses, users and fields" } },
+  { "SprintsIds", cmd_ids, { nargs = 0, desc = "Show and yank the Zoho ids for what you're on" } },
   { "SprintsRaw", cmd_raw, {
     nargs = "+",
     complete = function()
