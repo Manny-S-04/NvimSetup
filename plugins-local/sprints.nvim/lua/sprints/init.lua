@@ -12,8 +12,20 @@ function M.setup(opts)
     -- Reopen items by name (sprints://I22516): harpoon, :e, sessions. "sprints:/*" also matches
     -- the name with its slashes collapsed. Lazy-loading users also need
     -- `event = "BufReadCmd sprints:/*"` in their spec, so this exists before a command runs.
+    local group = vim.api.nvim_create_augroup("sprints.nvim", { clear = true })
+    -- Item text is prose: wrap it in every window that shows an item (window-local, so the
+    -- rest of your windows keep your global 'nowrap').
+    vim.api.nvim_create_autocmd("BufWinEnter", {
+      group = group,
+      pattern = "sprints:/*",
+      callback = function(args)
+        if vim.bo[args.buf].filetype == "sprints-item" and config.options.wrap ~= false then
+          require("sprints.ui.util").set_wrap(0, true)
+        end
+      end,
+    })
     vim.api.nvim_create_autocmd("BufReadCmd", {
-      group = vim.api.nvim_create_augroup("sprints.nvim", { clear = true }),
+      group = group,
       pattern = "sprints:/*",
       callback = function(args)
         require("sprints.ui.item").read_cmd(args.buf)

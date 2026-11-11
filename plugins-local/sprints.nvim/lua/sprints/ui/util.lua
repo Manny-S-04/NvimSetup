@@ -50,6 +50,22 @@ function M.apply_highlights(bufnr, highlights)
   end
 end
 
+--- Window-local ('setlocal') wrap for `win`: on = wrap at word boundaries with wrapped lines
+--- keeping their indent; off = one screen row per line. Local scope so it doesn't leak into
+--- the next buffer shown in that window.
+---@param win integer 0 = current
+---@param on boolean
+function M.set_wrap(win, on)
+  local function set(name, value)
+    vim.api.nvim_set_option_value(name, value, { scope = "local", win = win })
+  end
+  set("wrap", on)
+  if on then
+    set("linebreak", true)
+    set("breakindent", true)
+  end
+end
+
 --- Get (or create) a scratch buffer with a stable sprints:// name.
 function M.named_scratch(name, filetype)
   local bufnr = M.find_buf_by_name(name)

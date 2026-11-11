@@ -230,7 +230,7 @@ function M.open_with(name, title, fetch, opts)
   setup_keymaps(bufnr)
   util.show(bufnr, { role = "list" })
   vim.wo.cursorline = true
-  vim.wo.wrap = false -- one row per item, even in a narrow split
+  util.set_wrap(0, false) -- one row per item, even in a narrow split
   vim.wo.winbar = "<CR> open · n new · b board · m mine · yk key · g? more"
   load(bufnr)
   return bufnr

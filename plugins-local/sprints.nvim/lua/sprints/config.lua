@@ -39,6 +39,9 @@ local defaults = {
   accounts_url = nil,
   -- request timeout in milliseconds
   timeout = 10000,
+  -- Soft-wrap item buffers (title, description, comments) at word boundaries, whatever your
+  -- global 'wrap' is. Lists never wrap: one row per item.
+  wrap = true,
   -- page size for list endpoints (Zoho caps `range` at 100 on most of them)
   page_size = 100,
   -- Web link for an item. Placeholders: {dc} {team} {project} {sprint} {item} {no}.
